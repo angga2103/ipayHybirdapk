@@ -192,6 +192,48 @@ class _WebViewScreenState extends State<WebViewScreen> {
 
           final payload = StrukPayload.fromMessage(message.message);
 
+          // Coba ekstrak logo toko langsung dari DOM WebView jika payload belum menyertakan logo
+          if (payload.logoBase64 == null || payload.logoBase64!.isEmpty) {
+            try {
+              final result = await _controller.runJavaScriptReturningResult('''
+                (function() {
+                  try {
+                    var img = document.getElementById('storeReceiptLogo') || 
+                              document.querySelector('.receipt-logo') || 
+                              document.querySelector('#printableReceipt img') ||
+                              document.querySelector('img[alt*="Logo"]');
+                    if (img) {
+                      if (img.complete && img.naturalWidth > 0) {
+                        var c = document.createElement('canvas');
+                        c.width = img.naturalWidth;
+                        c.height = img.naturalHeight;
+                        var ctx = c.getContext('2d');
+                        ctx.fillStyle = '#FFFFFF';
+                        ctx.fillRect(0, 0, c.width, c.height);
+                        ctx.drawImage(img, 0, 0);
+                        return c.toDataURL('image/png');
+                      }
+                      if (img.src) return img.src;
+                    }
+                  } catch(e) {}
+                  return '';
+                })()
+              ''');
+
+              String res = result.toString().trim();
+              if (res.startsWith('"') && res.endsWith('"') && res.length > 2) {
+                res = res.substring(1, res.length - 1);
+              }
+              res = res.replaceAll(r'\"', '"');
+
+              if (res.isNotEmpty && res != 'null') {
+                await payload.attachExtractedLogo(res);
+              }
+            } catch (e) {
+              debugPrint('[PrintChannel] DOM logo extraction error: $e');
+            }
+          }
+
           // Cek preferensi metode cetak yang dipilih pengguna di Pengaturan
           final printMethod = await StorageService.instance.getPrintMethod();
           debugPrint('[PrintChannel] Print method chosen: $printMethod');
@@ -274,7 +316,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
     _controller = controller;
   }
 
-  void _handleRawBtUrl(String url) {
+  Future<void> _handleRawBtUrl(String url) async {
     try {
       String base64Data = '';
       const prefix = 'rawbt:data:text/plain;base64,';
@@ -287,6 +329,43 @@ class _WebViewScreenState extends State<WebViewScreen> {
         final decodedBytes = base64.decode(base64Data);
         final rawText = utf8.decode(decodedBytes, allowMalformed: true);
         final payload = StrukPayload.fromPlainText(rawText);
+
+        // Ekstrak logo dari DOM jika ada
+        try {
+          final result = await _controller.runJavaScriptReturningResult('''
+            (function() {
+              try {
+                var img = document.getElementById('storeReceiptLogo') || 
+                          document.querySelector('.receipt-logo') || 
+                          document.querySelector('#printableReceipt img') ||
+                          document.querySelector('img[alt*="Logo"]');
+                if (img) {
+                  if (img.complete && img.naturalWidth > 0) {
+                    var c = document.createElement('canvas');
+                    c.width = img.naturalWidth;
+                    c.height = img.naturalHeight;
+                    var ctx = c.getContext('2d');
+                    ctx.fillStyle = '#FFFFFF';
+                    ctx.fillRect(0, 0, c.width, c.height);
+                    ctx.drawImage(img, 0, 0);
+                    return c.toDataURL('image/png');
+                  }
+                  if (img.src) return img.src;
+                }
+              } catch(e) {}
+              return '';
+            })()
+          ''');
+          String res = result.toString().trim();
+          if (res.startsWith('"') && res.endsWith('"') && res.length > 2) {
+            res = res.substring(1, res.length - 1);
+          }
+          res = res.replaceAll(r'\"', '"');
+          if (res.isNotEmpty && res != 'null') {
+            await payload.attachExtractedLogo(res);
+          }
+        } catch (_) {}
+
         if (mounted) {
           PrinterService.instance.showPrintSelectionModal(context, payload);
         }

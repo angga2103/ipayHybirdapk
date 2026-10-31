@@ -142,7 +142,54 @@ class StrukPayload {
       }
     }
 
+    // 4. Fallback ke icon logo resmi aplikasi bawaan aset jika logo toko belum pernah di-cache
+    if (hasLogo) {
+      try {
+        final byteData = await rootBundle.load('assets/icon/app_logo.png');
+        final fallback = byteData.buffer.asUint8List();
+        if (fallback.isNotEmpty) {
+          cachedLogoBytes = fallback;
+          return fallback;
+        }
+      } catch (_) {}
+    }
+
     return null;
+  }
+
+  /// Memproses logo yang diekstrak langsung dari DOM WebView (Base64 atau URL HTTP)
+  Future<void> attachExtractedLogo(String dataOrUrl) async {
+    try {
+      final clean = dataOrUrl.trim();
+      if (clean.isEmpty || clean == 'null') return;
+
+      if (clean.startsWith('data:image') || (clean.length > 100 && !clean.startsWith('http'))) {
+        String cleanB64 = clean;
+        if (cleanB64.contains(',')) {
+          cleanB64 = cleanB64.split(',').last;
+        }
+        final bytes = base64Decode(cleanB64.trim());
+        if (bytes.isNotEmpty) {
+          cachedLogoBytes = bytes;
+          await PrinterService.instance.cacheStoreLogo(bytes);
+          debugPrint('[StrukPayload] Berhasil mengekstrak dan menyimpan cache logo Base64');
+        }
+      } else if (clean.startsWith('http')) {
+        final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
+        final request = await client.getUrl(Uri.parse(clean));
+        final response = await request.close();
+        if (response.statusCode == 200) {
+          final bytes = await consolidateHttpClientResponseBytes(response);
+          if (bytes.isNotEmpty) {
+            cachedLogoBytes = bytes;
+            await PrinterService.instance.cacheStoreLogo(bytes);
+            debugPrint('[StrukPayload] Berhasil download dan simpan cache logo dari URL: $clean');
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[StrukPayload] Error attachExtractedLogo: $e');
+    }
   }
 
   String buildReceiptText({int paperWidth = 32, String? headerStore, String? footerText}) {
