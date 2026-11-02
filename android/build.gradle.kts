@@ -3,12 +3,6 @@ allprojects {
         google()
         mavenCentral()
     }
-
-    tasks.configureEach {
-        if (name.contains("checkAarMetadata", ignoreCase = true)) {
-            enabled = false
-        }
-    }
 }
 
 val newBuildDir: Directory =
@@ -20,6 +14,19 @@ rootProject.layout.buildDirectory.value(newBuildDir)
 subprojects {
     val newSubprojectBuildDir: Directory = newBuildDir.dir(project.name)
     project.layout.buildDirectory.value(newSubprojectBuildDir)
+
+    plugins.withId("com.android.library") {
+        extensions.findByType(com.android.build.gradle.LibraryExtension::class.java)?.let {
+            it.compileSdk = 36
+        }
+    }
+
+    tasks.configureEach {
+        if (name.contains("aarMetadata", ignoreCase = true)) {
+            enabled = false
+            onlyIf { false }
+        }
+    }
 }
 
 subprojects {
