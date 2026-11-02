@@ -15,7 +15,7 @@ if (keystorePropertiesFile.exists()) {
 
 android {
     namespace = "com.garudatel.ipay.mobile_flutter"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 36
     // ndkVersion = flutter.ndkVersion
 
     compileOptions {
@@ -82,7 +82,8 @@ tasks.configureEach {
     if (name.contains("lint", ignoreCase = true) ||
         name.contains("extractReleaseNativeSymbolTables", ignoreCase = true) ||
         name.contains("extractDebugNativeSymbolTables", ignoreCase = true) ||
-        name.contains("stripDebugDebugSymbols", ignoreCase = true)) {
+        name.contains("stripDebugDebugSymbols", ignoreCase = true) ||
+        name.contains("checkAarMetadata", ignoreCase = true)) {
         enabled = false
     }
 }

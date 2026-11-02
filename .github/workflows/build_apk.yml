@@ -41,7 +41,7 @@ jobs:
       - name: Build Release APK
         run: |
           chmod +x android/gradlew
-          flutter build apk --release > build.log 2>&1 || BUILD_FAILED=1
+          flutter build apk --release --no-tree-shake-icons > build.log 2>&1 || BUILD_FAILED=1
           if [ "$BUILD_FAILED" = "1" ]; then
             tail -n 150 build.log > build_error.txt
             git config user.name "github-actions[bot]"
