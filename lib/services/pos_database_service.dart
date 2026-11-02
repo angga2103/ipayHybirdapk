@@ -25,7 +25,10 @@ class ConsignmentSummary {
     this.totalSettled = 0.0,
   });
 
-  double get remainingDue => totalDueToPenitip - totalSettled;
+  double get remainingDue {
+    final diff = totalDueToPenitip - totalSettled;
+    return diff < 0 ? 0.0 : diff;
+  }
 }
 
 class PosDatabaseService {
@@ -40,15 +43,29 @@ class PosDatabaseService {
     return _db!;
   }
 
-  Future<Database> _initDatabase() async {
+  Future<String> getDatabaseFilePath() async {
     final dbPath = await getDatabasesPath();
-    final path = join(dbPath, 'garudatel_pos.db');
+    return join(dbPath, 'garudatel_pos.db');
+  }
+
+  Future<void> closeDatabase() async {
+    if (_db != null && _db!.isOpen) {
+      await _db!.close();
+      _db = null;
+    }
+  }
+
+  Future<Database> _initDatabase() async {
+    final path = await getDatabaseFilePath();
 
     return await openDatabase(
       path,
-      version: 1,
+      version: 2,
+      onConfigure: (db) async {
+        await db.execute('PRAGMA foreign_keys = ON');
+      },
       onCreate: (db, version) async {
-        // 1. Tabel Produk
+        // 1. Tabel Produk POS
         await db.execute('''
           CREATE TABLE pos_products (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -59,8 +76,13 @@ class PosDatabaseService {
             harga_jual REAL NOT NULL DEFAULT 0,
             berat_gr REAL NOT NULL DEFAULT 0,
             stok INTEGER NOT NULL DEFAULT -1,
+            is_stock_managed INTEGER NOT NULL DEFAULT 1,
             kategori TEXT NOT NULL DEFAULT 'Umum',
             penitip TEXT,
+            product_type TEXT NOT NULL DEFAULT 'shop',
+            commission_type TEXT NOT NULL DEFAULT 'markup',
+            commission_value REAL NOT NULL DEFAULT 0,
+            is_archived INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
           );
@@ -69,6 +91,7 @@ class PosDatabaseService {
         await db.execute('CREATE INDEX idx_products_nama ON pos_products(nama);');
         await db.execute('CREATE INDEX idx_products_kategori ON pos_products(kategori);');
         await db.execute('CREATE INDEX idx_products_penitip ON pos_products(penitip);');
+        await db.execute('CREATE INDEX idx_products_archived ON pos_products(is_archived);');
 
         // 2. Tabel Transaksi
         await db.execute('''
@@ -85,7 +108,8 @@ class PosDatabaseService {
             change_due REAL NOT NULL,
             payment_method TEXT NOT NULL DEFAULT 'Tunai',
             cashier_name TEXT NOT NULL DEFAULT 'Kasir',
-            note TEXT
+            note TEXT,
+            status TEXT NOT NULL DEFAULT 'COMPLETED'
           );
         ''');
         await db.execute('CREATE INDEX idx_trx_invoice ON pos_transactions(invoice_no);');
@@ -106,6 +130,8 @@ class PosDatabaseService {
             subtotal REAL NOT NULL,
             profit REAL NOT NULL,
             penitip TEXT,
+            is_stock_managed INTEGER NOT NULL DEFAULT 1,
+            due_to_penitip REAL NOT NULL DEFAULT 0,
             FOREIGN KEY (transaction_id) REFERENCES pos_transactions (id) ON DELETE CASCADE
           );
         ''');
@@ -125,8 +151,70 @@ class PosDatabaseService {
           );
         ''');
 
-        // Seeding Awal (Contoh Produk Default agar langsung bisa dicoba kasir)
+        // 5. Tabel Rekap Penutupan Kas Harian (Laporan Z)
+        await db.execute('''
+          CREATE TABLE pos_daily_closings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            closing_date TEXT UNIQUE NOT NULL,
+            total_transactions INTEGER NOT NULL DEFAULT 0,
+            total_revenue REAL NOT NULL DEFAULT 0,
+            total_profit REAL NOT NULL DEFAULT 0,
+            cash_revenue REAL NOT NULL DEFAULT 0,
+            non_cash_revenue REAL NOT NULL DEFAULT 0,
+            consignment_due REAL NOT NULL DEFAULT 0,
+            closed_at TEXT NOT NULL,
+            notes TEXT
+          );
+        ''');
+        await db.execute('CREATE INDEX idx_closing_date ON pos_daily_closings(closing_date);');
+
+        // Seeding Awal Default Produk
         await _seedDefaultProducts(db);
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          // Migrasi Skema v1 -> v2
+          try {
+            await db.execute('ALTER TABLE pos_products ADD COLUMN is_stock_managed INTEGER NOT NULL DEFAULT 1;');
+          } catch (_) {}
+          try {
+            await db.execute("ALTER TABLE pos_products ADD COLUMN product_type TEXT NOT NULL DEFAULT 'shop';");
+          } catch (_) {}
+          try {
+            await db.execute("ALTER TABLE pos_products ADD COLUMN commission_type TEXT NOT NULL DEFAULT 'markup';");
+          } catch (_) {}
+          try {
+            await db.execute('ALTER TABLE pos_products ADD COLUMN commission_value REAL NOT NULL DEFAULT 0;');
+          } catch (_) {}
+          try {
+            await db.execute('ALTER TABLE pos_products ADD COLUMN is_archived INTEGER NOT NULL DEFAULT 0;');
+          } catch (_) {}
+          try {
+            await db.execute("ALTER TABLE pos_transactions ADD COLUMN status TEXT NOT NULL DEFAULT 'COMPLETED';");
+          } catch (_) {}
+          try {
+            await db.execute('ALTER TABLE pos_transaction_items ADD COLUMN is_stock_managed INTEGER NOT NULL DEFAULT 1;');
+          } catch (_) {}
+          try {
+            await db.execute('ALTER TABLE pos_transaction_items ADD COLUMN due_to_penitip REAL NOT NULL DEFAULT 0;');
+          } catch (_) {}
+          try {
+            await db.execute('''
+              CREATE TABLE IF NOT EXISTS pos_daily_closings (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                closing_date TEXT UNIQUE NOT NULL,
+                total_transactions INTEGER NOT NULL DEFAULT 0,
+                total_revenue REAL NOT NULL DEFAULT 0,
+                total_profit REAL NOT NULL DEFAULT 0,
+                cash_revenue REAL NOT NULL DEFAULT 0,
+                non_cash_revenue REAL NOT NULL DEFAULT 0,
+                consignment_due REAL NOT NULL DEFAULT 0,
+                closed_at TEXT NOT NULL,
+                notes TEXT
+              );
+            ''');
+          } catch (_) {}
+        }
       },
     );
   }
@@ -142,8 +230,13 @@ class PosDatabaseService {
         'harga_jual': 15000.0,
         'berat_gr': 250.0,
         'stok': 50,
+        'is_stock_managed': 1,
         'kategori': 'Minuman',
         'penitip': null,
+        'product_type': 'shop',
+        'commission_type': 'markup',
+        'commission_value': 0.0,
+        'is_archived': 0,
         'created_at': now,
         'updated_at': now,
       },
@@ -154,9 +247,14 @@ class PosDatabaseService {
         'harga_dasar': 2000.0,
         'harga_jual': 5000.0,
         'berat_gr': 300.0,
-        'stok': -1, // Unlimited
+        'stok': -1,
+        'is_stock_managed': 0, // Bebas stok / unlimited
         'kategori': 'Minuman',
         'penitip': null,
+        'product_type': 'shop',
+        'commission_type': 'markup',
+        'commission_value': 0.0,
+        'is_archived': 0,
         'created_at': now,
         'updated_at': now,
       },
@@ -168,8 +266,13 @@ class PosDatabaseService {
         'harga_jual': 12000.0,
         'berat_gr': 200.0,
         'stok': 30,
+        'is_stock_managed': 1,
         'kategori': 'Makanan',
         'penitip': null,
+        'product_type': 'shop',
+        'commission_type': 'markup',
+        'commission_value': 0.0,
+        'is_archived': 0,
         'created_at': now,
         'updated_at': now,
       },
@@ -181,12 +284,17 @@ class PosDatabaseService {
         'harga_jual': 35000.0,
         'berat_gr': 50.0,
         'stok': 20,
+        'is_stock_managed': 1,
         'kategori': 'Rokok & Pulsa',
         'penitip': null,
+        'product_type': 'shop',
+        'commission_type': 'markup',
+        'commission_value': 0.0,
+        'is_archived': 0,
         'created_at': now,
         'updated_at': now,
       },
-      // KONSINYASI (TITIPAN)
+      // KONSINYASI (TITIP JUAL)
       {
         'kode': 'KS-001',
         'nama': 'Keripik Pisang Coklat Bu Siti',
@@ -195,28 +303,38 @@ class PosDatabaseService {
         'harga_jual': 11000.0,
         'berat_gr': 150.0,
         'stok': 15,
+        'is_stock_managed': 1,
         'kategori': 'Konsinyasi',
         'penitip': 'Bu Siti',
+        'product_type': 'consignment',
+        'commission_type': 'markup', // Selisih 3.000 untuk toko
+        'commission_value': 0.0,
+        'is_archived': 0,
         'created_at': now,
         'updated_at': now,
       },
       {
         'kode': 'KS-002',
-        'nama': 'Roti Bakar Coklat Keju Pak Joko',
+        'nama': 'Roti Bakar Keju Pak Joko',
         'unit': 'pcs',
         'harga_dasar': 5000.0,
         'harga_jual': 7000.0,
         'berat_gr': 120.0,
         'stok': 10,
+        'is_stock_managed': 1,
         'kategori': 'Konsinyasi',
         'penitip': 'Pak Joko',
+        'product_type': 'consignment',
+        'commission_type': 'nominal',
+        'commission_value': 1500.0, // Komisi 1.500 per pcs
+        'is_archived': 0,
         'created_at': now,
         'updated_at': now,
       },
     ];
 
     for (final p in defaults) {
-      await db.insert('pos_products', p);
+      await db.insert('pos_products', p, conflictAlgorithm: ConflictAlgorithm.ignore);
     }
   }
 
@@ -224,34 +342,45 @@ class PosDatabaseService {
   // MANAJEMEN PRODUK
   // ==========================================
 
-  Future<List<PosProduct>> getAllProducts() async {
+  Future<List<PosProduct>> getAllProducts({bool includeArchived = false}) async {
     final db = await database;
-    final List<Map<String, dynamic>> maps = await db.query('pos_products', orderBy: 'nama ASC');
+    final where = includeArchived ? null : 'is_archived = 0';
+    final List<Map<String, dynamic>> maps = await db.query(
+      'pos_products',
+      where: where,
+      orderBy: 'nama ASC',
+    );
     return maps.map((m) => PosProduct.fromMap(m)).toList();
   }
 
-  Future<List<PosProduct>> searchProducts(String query, {String? category}) async {
+  Future<List<PosProduct>> searchProducts(String query, {String? category, bool includeArchived = false}) async {
     final db = await database;
-    String where = '';
+    List<String> conditions = [];
     List<dynamic> whereArgs = [];
 
+    if (!includeArchived) {
+      conditions.add('is_archived = 0');
+    }
+
     if (query.trim().isNotEmpty) {
-      where = '(kode LIKE ? OR nama LIKE ?)';
+      conditions.add('(kode LIKE ? OR nama LIKE ?)');
       whereArgs.addAll(['%${query.trim()}%', '%${query.trim()}%']);
     }
 
     if (category != null && category.isNotEmpty && category != 'ALL') {
       if (category == 'Konsinyasi') {
-        where += '${where.isEmpty ? '' : ' AND '}penitip IS NOT NULL AND penitip != ""';
+        conditions.add('(penitip IS NOT NULL AND penitip != "" OR product_type = "consignment")');
       } else {
-        where += '${where.isEmpty ? '' : ' AND '}kategori = ?';
+        conditions.add('kategori = ?');
         whereArgs.add(category);
       }
     }
 
+    final whereClause = conditions.isEmpty ? null : conditions.join(' AND ');
+
     final List<Map<String, dynamic>> maps = await db.query(
       'pos_products',
-      where: where.isEmpty ? null : where,
+      where: whereClause,
       whereArgs: whereArgs.isEmpty ? null : whereArgs,
       orderBy: 'nama ASC',
     );
@@ -261,7 +390,7 @@ class PosDatabaseService {
   Future<List<String>> getAllCategories() async {
     final db = await database;
     final List<Map<String, dynamic>> maps = await db.rawQuery(
-      'SELECT DISTINCT kategori FROM pos_products WHERE kategori IS NOT NULL AND kategori != "" ORDER BY kategori ASC',
+      'SELECT DISTINCT kategori FROM pos_products WHERE is_archived = 0 AND kategori IS NOT NULL AND kategori != "" ORDER BY kategori ASC',
     );
     return maps.map((m) => m['kategori'].toString()).toList();
   }
@@ -269,7 +398,7 @@ class PosDatabaseService {
   Future<List<String>> getAllConsignors() async {
     final db = await database;
     final List<Map<String, dynamic>> maps = await db.rawQuery(
-      'SELECT DISTINCT penitip FROM pos_products WHERE penitip IS NOT NULL AND penitip != "" ORDER BY penitip ASC',
+      'SELECT DISTINCT penitip FROM pos_products WHERE is_archived = 0 AND penitip IS NOT NULL AND penitip != "" ORDER BY penitip ASC',
     );
     return maps.map((m) => m['penitip'].toString()).toList();
   }
@@ -297,14 +426,40 @@ class PosDatabaseService {
     return results.length;
   }
 
-  Future<int> deleteProduct(String kode) async {
+  /// Menghapus produk secara aman (Soft delete jika sudah ada transaksi, hard delete jika belum)
+  Future<bool> deleteOrArchiveProduct(String kode) async {
     final db = await database;
-    return await db.delete('pos_products', where: 'kode = ?', whereArgs: [kode]);
+    // Cek apakah produk sudah ada riwayat transaksi
+    final check = await db.rawQuery(
+      'SELECT COUNT(id) as cnt FROM pos_transaction_items WHERE product_kode = ?',
+      [kode],
+    );
+    final count = (check.first['cnt'] as num).toInt();
+
+    if (count > 0) {
+      // Ada transaksi: Soft delete (Arsipkan)
+      await db.update(
+        'pos_products',
+        {'is_archived': 1, 'updated_at': DateTime.now().toIso8601String()},
+        where: 'kode = ?',
+        whereArgs: [kode],
+      );
+      return false; // Diarsipkan (bukan dihapus permanen)
+    } else {
+      // Belum ada transaksi: Hapus permanen
+      await db.delete('pos_products', where: 'kode = ?', whereArgs: [kode]);
+      return true; // Dihapus permanen
+    }
   }
 
-  Future<int> deleteAllProducts() async {
+  Future<void> restoreProduct(String kode) async {
     final db = await database;
-    return await db.delete('pos_products');
+    await db.update(
+      'pos_products',
+      {'is_archived': 0, 'updated_at': DateTime.now().toIso8601String()},
+      where: 'kode = ?',
+      whereArgs: [kode],
+    );
   }
 
   // ==========================================
@@ -330,7 +485,7 @@ class PosDatabaseService {
       normalAmount += item.normalSubtotal;
       profitAmount += item.profitAmount;
       if (item.isConsignment) {
-        consignmentDueAmount += item.costPrice * item.qty;
+        consignmentDueAmount += item.dueToPenitipAmount;
       }
     }
 
@@ -352,13 +507,14 @@ class PosDatabaseService {
       paymentMethod: paymentMethod,
       cashierName: cashierName,
       note: note,
+      status: 'COMPLETED',
     );
 
     await db.transaction((txn) async {
       // 1. Simpan Header Transaksi
       final trxId = await txn.insert('pos_transactions', trx.toMap());
 
-      // 2. Simpan Setiap Item
+      // 2. Simpan Setiap Item Transaksi
       for (final item in cartItems) {
         final trxItem = PosTransactionItem(
           transactionId: trxId,
@@ -372,16 +528,20 @@ class PosDatabaseService {
           subtotal: item.subtotal,
           profit: item.profitAmount,
           penitip: item.penitip,
+          isStockManaged: item.isStockManaged,
+          dueToPenitip: item.dueToPenitipAmount,
         );
         await txn.insert('pos_transaction_items', trxItem.toMap(trxId));
 
-        // 3. Potong Stok Produk jika stok terbatas (stok >= 0)
-        await txn.rawUpdate('''
-          UPDATE pos_products 
-          SET stok = CASE WHEN stok >= ? THEN stok - ? ELSE 0 END,
-              updated_at = ?
-          WHERE kode = ? AND stok >= 0
-        ''', [item.qty, item.qty, now.toIso8601String(), item.product.kode]);
+        // 3. Potong Stok Produk HANYA jika kelola stok aktif (isStockManaged == true)
+        if (item.isStockManaged) {
+          await txn.rawUpdate('''
+            UPDATE pos_products 
+            SET stok = CASE WHEN stok >= ? THEN stok - ? ELSE 0 END,
+                updated_at = ?
+            WHERE kode = ? AND is_stock_managed = 1 AND stok >= 0
+          ''', [item.qty, item.qty, now.toIso8601String(), item.product.kode]);
+        }
       }
     });
 
@@ -396,6 +556,8 @@ class PosDatabaseService {
       subtotal: c.subtotal,
       profit: c.profitAmount,
       penitip: c.penitip,
+      isStockManaged: c.isStockManaged,
+      dueToPenitip: c.dueToPenitipAmount,
     )).toList();
 
     return PosTransaction(
@@ -411,8 +573,53 @@ class PosDatabaseService {
       paymentMethod: trx.paymentMethod,
       cashierName: trx.cashierName,
       note: trx.note,
+      status: 'COMPLETED',
       items: savedItems,
     );
+  }
+
+  /// Membatalkan transaksi (Retur Penuh) dan mengembalikan stok yang dikelola
+  Future<bool> cancelTransaction(String invoiceNo, {String? reason}) async {
+    final db = await database;
+    final trxs = await db.query('pos_transactions', where: 'invoice_no = ?', whereArgs: [invoiceNo]);
+    if (trxs.isEmpty) return false;
+
+    final trxId = trxs.first['id'] as int;
+    final items = await db.query('pos_transaction_items', where: 'transaction_id = ?', whereArgs: [trxId]);
+
+    await db.transaction((txn) async {
+      // 1. Kembalikan stok untuk produk yang dikelola
+      for (final it in items) {
+        final kode = it['product_kode']?.toString() ?? '';
+        final qty = (it['qty'] as num).toInt();
+        final isStockManaged = (it['is_stock_managed'] == 1 || it['is_stock_managed'] == true);
+
+        if (isStockManaged && kode.isNotEmpty) {
+          await txn.rawUpdate('''
+            UPDATE pos_products 
+            SET stok = stok + ?,
+                updated_at = ?
+            WHERE kode = ? AND is_stock_managed = 1 AND stok >= 0
+          ''', [qty, DateTime.now().toIso8601String(), kode]);
+        }
+      }
+
+      // 2. Tandai transaksi sebagai BATAL (CANCELLED)
+      final existingNote = trxs.first['note']?.toString() ?? '';
+      final updatedNote = '$existingNote [DIBATALKAN: ${reason ?? "Pembatalan Kasir"}]'.trim();
+
+      await txn.update(
+        'pos_transactions',
+        {
+          'status': 'CANCELLED',
+          'note': updatedNote,
+        },
+        where: 'id = ?',
+        whereArgs: [trxId],
+      );
+    });
+
+    return true;
   }
 
   Future<List<PosTransaction>> getAllTransactions({int limit = 50}) async {
@@ -451,9 +658,11 @@ class PosDatabaseService {
         COALESCE(SUM(profit_amount), 0) as total_profit,
         COALESCE(SUM(discount_amount), 0) as total_discount,
         COALESCE(SUM(consignment_due_amount), 0) as total_consignment_due,
+        COALESCE(SUM(CASE WHEN payment_method = 'Tunai' THEN total_amount ELSE 0 END), 0) as cash_omset,
+        COALESCE(SUM(CASE WHEN payment_method != 'Tunai' THEN total_amount ELSE 0 END), 0) as non_cash_omset,
         COUNT(id) as total_trx
       FROM pos_transactions
-      WHERE date_time LIKE ?
+      WHERE date_time LIKE ? AND status != 'CANCELLED'
     ''', ['$todayPrefix%']);
 
     if (result.isNotEmpty) {
@@ -463,6 +672,8 @@ class PosDatabaseService {
         'total_profit': (row['total_profit'] as num).toDouble(),
         'total_discount': (row['total_discount'] as num).toDouble(),
         'total_consignment_due': (row['total_consignment_due'] as num).toDouble(),
+        'cash_omset': (row['cash_omset'] as num).toDouble(),
+        'non_cash_omset': (row['non_cash_omset'] as num).toDouble(),
         'total_trx': (row['total_trx'] as num).toDouble(),
       };
     }
@@ -472,6 +683,8 @@ class PosDatabaseService {
       'total_profit': 0.0,
       'total_discount': 0.0,
       'total_consignment_due': 0.0,
+      'cash_omset': 0.0,
+      'non_cash_omset': 0.0,
       'total_trx': 0.0,
     };
   }
@@ -486,20 +699,21 @@ class PosDatabaseService {
       final prodResult = await db.rawQuery('''
         SELECT COUNT(id) as variant_count, COALESCE(SUM(CASE WHEN stok > 0 THEN stok ELSE 0 END), 0) as total_stock
         FROM pos_products
-        WHERE penitip = ?
+        WHERE penitip = ? AND is_archived = 0
       ''', [p]);
       final variantCount = (prodResult.first['variant_count'] as num).toInt();
       final totalStock = (prodResult.first['total_stock'] as num).toInt();
 
-      // 2. Data penjualan terakumulasi
+      // 2. Data penjualan terakumulasi (dari transaksi aktif yang tidak dibatalkan)
       final salesResult = await db.rawQuery('''
         SELECT 
-          COALESCE(SUM(qty), 0) as total_sold,
-          COALESCE(SUM(subtotal), 0) as total_gross,
-          COALESCE(SUM(cost_price * qty), 0) as total_due,
-          COALESCE(SUM(profit), 0) as store_fee
-        FROM pos_transaction_items
-        WHERE penitip = ?
+          COALESCE(SUM(i.qty), 0) as total_sold,
+          COALESCE(SUM(i.subtotal), 0) as total_gross,
+          COALESCE(SUM(CASE WHEN i.due_to_penitip > 0 THEN i.due_to_penitip ELSE (i.cost_price * i.qty) END), 0) as total_due,
+          COALESCE(SUM(i.profit), 0) as store_fee
+        FROM pos_transaction_items i
+        JOIN pos_transactions t ON i.transaction_id = t.id
+        WHERE i.penitip = ? AND t.status != 'CANCELLED'
       ''', [p]);
       final totalSold = (salesResult.first['total_sold'] as num).toInt();
       final totalGross = (salesResult.first['total_gross'] as num).toDouble();
@@ -545,5 +759,45 @@ class PosDatabaseService {
       'store_fee': storeFee,
       'note': note,
     });
+  }
+
+  // ==========================================
+  // TUTUP KAS HARIAN (LAPORAN Z)
+  // ==========================================
+
+  Future<PosDailyClosing> saveDailyClosing({String? notes}) async {
+    final db = await database;
+    final today = DateTime.now().toIso8601String().substring(0, 10);
+    final stats = await getTodaySalesStats();
+
+    final closing = PosDailyClosing(
+      closingDate: today,
+      totalTransactions: stats['total_trx']?.toInt() ?? 0,
+      totalRevenue: stats['total_omset'] ?? 0.0,
+      totalProfit: stats['total_profit'] ?? 0.0,
+      cashRevenue: stats['cash_omset'] ?? 0.0,
+      nonCashRevenue: stats['non_cash_omset'] ?? 0.0,
+      consignmentDue: stats['total_consignment_due'] ?? 0.0,
+      closedAt: DateTime.now(),
+      notes: notes,
+    );
+
+    await db.insert(
+      'pos_daily_closings',
+      closing.toMap(),
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+
+    return closing;
+  }
+
+  Future<List<PosDailyClosing>> getAllDailyClosings({int limit = 30}) async {
+    final db = await database;
+    final maps = await db.query(
+      'pos_daily_closings',
+      orderBy: 'closing_date DESC',
+      limit: limit,
+    );
+    return maps.map((m) => PosDailyClosing.fromMap(m)).toList();
   }
 }

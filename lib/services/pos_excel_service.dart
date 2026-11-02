@@ -181,6 +181,9 @@ class PosExcelService {
       final penitipRaw = (idxPenitip >= 0) ? _getCellValue(row, idxPenitip) : '';
       final penitip = penitipRaw.trim().isNotEmpty ? penitipRaw.trim() : null;
 
+      final isStockManaged = stok >= 0;
+      final productType = penitip != null ? 'consignment' : 'shop';
+
       result.add(PosProduct(
         kode: safeKode,
         nama: safeNama,
@@ -188,9 +191,11 @@ class PosExcelService {
         hargaDasar: dasar,
         hargaJual: jual > 0 ? jual : dasar,
         beratGr: berat,
-        stok: stok,
+        stok: isStockManaged ? stok : -1,
+        isStockManaged: isStockManaged,
         kategori: kategori,
         penitip: penitip,
+        productType: productType,
       ));
     }
 

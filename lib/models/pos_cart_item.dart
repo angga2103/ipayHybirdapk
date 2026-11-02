@@ -17,12 +17,19 @@ class PosCartItem {
   double get subtotal => actualPrice * qty;
   double get normalSubtotal => normalPrice * qty;
   double get discountAmount => (normalPrice - actualPrice) * qty;
-  double get profitAmount => (actualPrice - costPrice) * qty;
+
+  Map<String, double> get commissionBreakdown => product.calculateUnitCommission(actualPrice);
+  double get unitStoreFee => commissionBreakdown['store_fee'] ?? (actualPrice - costPrice);
+  double get unitDueToPenitip => commissionBreakdown['due_to_penitip'] ?? 0.0;
+
+  double get profitAmount => isConsignment ? (unitStoreFee * qty) : ((actualPrice - costPrice) * qty);
+  double get dueToPenitipAmount => isConsignment ? (unitDueToPenitip * qty) : 0.0;
 
   bool get isBelowCost => actualPrice < costPrice;
   bool get isPriceModified => (actualPrice - normalPrice).abs() > 0.001;
   bool get isConsignment => product.isConsignment;
   String? get penitip => product.penitip;
+  bool get isStockManaged => product.isStockManaged;
 
   PosCartItem copyWith({
     PosProduct? product,

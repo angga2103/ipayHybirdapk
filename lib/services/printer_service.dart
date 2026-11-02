@@ -434,6 +434,75 @@ class PrinterService {
     }
   }
 
+  /// Mengambil profil toko yang tersimpan (Nama, Tagline, Footer, Toggle Logo)
+  Future<Map<String, dynamic>> getStoreProfile() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return {
+        'name': prefs.getString('store_profile_name') ?? 'IPAY',
+        'tagline': prefs.getString('store_profile_tagline') ?? 'Platform PPOB Terpercaya',
+        'footer': prefs.getString('store_profile_footer') ?? 'Terima kasih atas kunjungan Anda!',
+        'show_logo': prefs.getBool('printer_print_logo_enabled') ?? true,
+      };
+    } catch (_) {
+      return {
+        'name': 'IPAY',
+        'tagline': 'Platform PPOB Terpercaya',
+        'footer': 'Terima kasih atas kunjungan Anda!',
+        'show_logo': true,
+      };
+    }
+  }
+
+  /// Sinkronisasi profil toko & logo otomatis dari panel admin web (https://ipay.my.id/admin/store_settings)
+  Future<void> syncStoreSettingsFromBackend() async {
+    try {
+      final url = '${AppConfig.baseUrl}/api/store_info';
+      final client = HttpClient()
+        ..badCertificateCallback = ((cert, host, port) => true)
+        ..connectionTimeout = const Duration(seconds: 4);
+      final request = await client.getUrl(Uri.parse(url));
+      final response = await request.close();
+      if (response.statusCode == 200) {
+        final bodyStr = await response.transform(utf8.decoder).join();
+        final data = jsonDecode(bodyStr);
+        if (data is Map && data['success'] == true) {
+          final prefs = await SharedPreferences.getInstance();
+          if (data['name'] != null && data['name'].toString().isNotEmpty) {
+            await prefs.setString('store_profile_name', data['name'].toString());
+          }
+          if (data['tagline'] != null && data['tagline'].toString().isNotEmpty) {
+            await prefs.setString('store_profile_tagline', data['tagline'].toString());
+          }
+          if (data['receipt_footer'] != null && data['receipt_footer'].toString().isNotEmpty) {
+            await prefs.setString('store_profile_footer', data['receipt_footer'].toString());
+          }
+          if (data['receipt_show_logo'] != null) {
+            await prefs.setBool('printer_print_logo_enabled', data['receipt_show_logo'] == true);
+          }
+          final logoUrl = data['logo_url']?.toString() ?? '';
+          if (logoUrl.isNotEmpty) {
+            String fullLogoUrl = logoUrl;
+            if (fullLogoUrl.startsWith('/')) {
+              fullLogoUrl = '${AppConfig.baseUrl}$fullLogoUrl';
+            }
+            final logoReq = await client.getUrl(Uri.parse(fullLogoUrl));
+            final logoResp = await logoReq.close();
+            if (logoResp.statusCode == 200) {
+              final bytes = await consolidateHttpClientResponseBytes(logoResp);
+              if (bytes.isNotEmpty) {
+                await cacheStoreLogo(bytes);
+                debugPrint('[PrinterService] Sukses sinkronisasi logo admin ke POS: $fullLogoUrl');
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[PrinterService] Sinkronisasi profil toko offline/dilewati: $e');
+    }
+  }
+
   // ==========================================
   // 3. FORMAT STRUK ESC/POS
   // ==========================================
@@ -782,9 +851,14 @@ class PrinterService {
 
     final dateFormatted = '${trx.dateTime.day.toString().padLeft(2, '0')}/${trx.dateTime.month.toString().padLeft(2, '0')}/${trx.dateTime.year} ${trx.dateTime.hour.toString().padLeft(2, '0')}:${trx.dateTime.minute.toString().padLeft(2, '0')}';
 
+    final storeProfile = await getStoreProfile();
+    final effectiveStoreName = storeName ?? storeProfile['name'] ?? 'IPAY';
+    final effectiveAddress = address ?? storeProfile['tagline'] ?? 'Platform PPOB Terpercaya';
+    final effectiveFooter = storeProfile['footer'] ?? 'Terima kasih atas kunjungan Anda!\nBarang yang dibeli tidak dapat ditukar.';
+
     return await printReceipt(
-      storeName: storeName ?? 'GARUDATEL POS',
-      address: address ?? 'Pusat Pembayaran PPOB & Kasir Toko',
+      storeName: effectiveStoreName,
+      address: effectiveAddress,
       phone: phone,
       orderNo: trx.invoiceNo,
       date: dateFormatted,
@@ -796,7 +870,7 @@ class PrinterService {
       paymentMethod: trx.paymentMethod,
       cashReceived: formatRp(trx.cashPaid),
       change: formatRp(trx.changeDue),
-      footerMessage: 'Terima kasih atas kunjungan Anda!\nBarang yang dibeli tidak dapat ditukar.',
+      footerMessage: effectiveFooter,
       logoBytes: logoBytes,
     );
   }
@@ -890,6 +964,100 @@ class PrinterService {
       return await PrintBluetoothThermal.writeBytes(bytes);
     } catch (e) {
       debugPrint('[PrinterService] Error printConsignmentReport: $e');
+      return false;
+    }
+  }
+
+  /// Cetak Struk Rekap Penutupan Kas Harian (Laporan Z) ke Printer Thermal
+  Future<bool> printDailyClosingReport(PosDailyClosing closing) async {
+    try {
+      final isConnected = await checkConnectionStatus();
+      if (!isConnected) {
+        final savedMac = await getSavedMac();
+        if (savedMac != null && savedMac.isNotEmpty) {
+          final ok = await connect(savedMac);
+          if (!ok) return false;
+        } else {
+          return false;
+        }
+      }
+
+      final profile = await CapabilityProfile.load();
+      final generator = Generator(_paperSize, profile);
+      List<int> bytes = [];
+
+      bytes += generator.reset();
+
+      // Logo Toko (sama dengan struk PPOB & Admin Panel)
+      final logoEnabled = await isLogoPrintEnabled();
+      if (logoEnabled) {
+        Uint8List? logoBytes = await getCachedStoreLogo();
+        if (logoBytes == null || logoBytes.isEmpty) {
+          try {
+            final byteData = await rootBundle.load('assets/icon/app_logo.png');
+            logoBytes = byteData.buffer.asUint8List();
+          } catch (_) {}
+        }
+        if (logoBytes != null && logoBytes.isNotEmpty) {
+          final logoRaster = processLogoRaster(logoBytes, generator);
+          if (logoRaster.isNotEmpty) bytes += logoRaster;
+        }
+      }
+
+      final storeProf = await getStoreProfile();
+      bytes += generator.text(
+        storeProf['name'] ?? 'IPAY',
+        styles: const PosStyles(align: PosAlign.center, bold: true, height: PosTextSize.size2, width: PosTextSize.size2),
+      );
+      bytes += generator.text(
+        storeProf['tagline'] ?? 'Platform PPOB & Kasir Toko',
+        styles: const PosStyles(align: PosAlign.center),
+      );
+      bytes += generator.text(dividerLine, styles: const PosStyles(align: PosAlign.center));
+
+      bytes += generator.text(
+        'REKAP PENUTUPAN KAS (LAPORAN Z)',
+        styles: const PosStyles(align: PosAlign.center, bold: true),
+      );
+      bytes += generator.text(
+        'Tanggal Rekap: ${closing.closingDate}',
+        styles: const PosStyles(align: PosAlign.center),
+      );
+      bytes += generator.text(dividerLine, styles: const PosStyles(align: PosAlign.center));
+
+      String formatRp(double val) {
+        return 'Rp ${val.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]}.')}';
+      }
+
+      bytes += generator.text(formatTwoColumns('Total Transaksi', '${closing.totalTransactions} Nota'));
+      bytes += generator.text(formatTwoColumns('Total Omset Penjualan', formatRp(closing.totalRevenue)));
+      bytes += generator.text(formatTwoColumns('Uang Kas Masuk (Tunai)', formatRp(closing.cashRevenue)));
+      bytes += generator.text(formatTwoColumns('Pembayaran Non-Tunai', formatRp(closing.nonCashRevenue)));
+      bytes += generator.text(dividerLine, styles: const PosStyles(align: PosAlign.center));
+
+      bytes += generator.text(
+        formatTwoColumns('LABA BERSIH TOKO', formatRp(closing.totalProfit)),
+        styles: const PosStyles(bold: true),
+      );
+      bytes += generator.text(formatTwoColumns('Kewajiban Titipan', formatRp(closing.consignmentDue)));
+      bytes += generator.text(dividerLine, styles: const PosStyles(align: PosAlign.center));
+
+      final now = closing.closedAt;
+      final timeStr = '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+      bytes += generator.text('Waktu Cetak: $timeStr', styles: const PosStyles(align: PosAlign.center));
+      bytes += generator.text(
+        storeProf['footer'] ?? 'Terima kasih!',
+        styles: const PosStyles(align: PosAlign.center),
+      );
+
+      bytes += generator.feed(1);
+      if (_paperSize == PaperSize.mm80) {
+        bytes += generator.cut();
+      }
+
+      return await PrintBluetoothThermal.writeBytes(bytes);
+    } catch (e) {
+      debugPrint('[PrinterService] Error printDailyClosingReport: $e');
       return false;
     }
   }

@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 import '../models/pos_cart_item.dart';
 import '../models/pos_product.dart';
 import '../models/pos_transaction.dart';
+import '../services/pos_backup_service.dart';
 import '../services/pos_database_service.dart';
 import '../services/pos_excel_service.dart';
 import '../services/printer_service.dart';
@@ -19,12 +20,14 @@ class PosProvider extends ChangeNotifier {
     'total_profit': 0.0,
     'total_discount': 0.0,
     'total_consignment_due': 0.0,
+    'cash_omset': 0.0,
+    'non_cash_omset': 0.0,
     'total_trx': 0.0,
   };
   bool _isLoading = false;
   String? _errorMessage;
   String _cashierName = 'Kasir';
-  String _storeName = 'GARUDATEL POS';
+  String _storeName = 'IPAY';
 
   List<PosProduct> get products => _products;
   List<String> get categories => _categories;
@@ -51,6 +54,8 @@ class PosProvider extends ChangeNotifier {
 
   List<PosProduct> get filteredProducts {
     return _products.where((p) {
+      if (p.isArchived) return false;
+
       final matchesCategory = (_selectedCategory == 'ALL') ||
           (_selectedCategory == 'Konsinyasi' ? p.isConsignment : p.kategori.toLowerCase() == _selectedCategory.toLowerCase());
 
@@ -74,6 +79,15 @@ class PosProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
+      // Sinkronisasi profil toko & logo otomatis dari backend admin web secara background
+      PrinterService.instance.syncStoreSettingsFromBackend().then((_) async {
+        final profile = await PrinterService.instance.getStoreProfile();
+        if (profile['name'] != null && profile['name'].toString().isNotEmpty) {
+          _storeName = profile['name'].toString();
+          notifyListeners();
+        }
+      });
+
       await refreshAll();
     } catch (e) {
       _errorMessage = 'Gagal memuat database POS: $e';
@@ -84,7 +98,7 @@ class PosProvider extends ChangeNotifier {
   }
 
   Future<void> refreshAll() async {
-    _products = await PosDatabaseService.instance.getAllProducts();
+    _products = await PosDatabaseService.instance.getAllProducts(includeArchived: false);
     _categories = await PosDatabaseService.instance.getAllCategories();
     _consignments = await PosDatabaseService.instance.getConsignmentSummaries();
     _transactions = await PosDatabaseService.instance.getAllTransactions(limit: 50);
@@ -215,15 +229,81 @@ class PosProvider extends ChangeNotifier {
     }
   }
 
-  Future<bool> deleteProduct(String kode) async {
+  Future<bool> deleteOrArchiveProduct(String kode) async {
     try {
-      await PosDatabaseService.instance.deleteProduct(kode);
+      final isHardDeleted = await PosDatabaseService.instance.deleteOrArchiveProduct(kode);
       await refreshAll();
-      return true;
+      return isHardDeleted;
     } catch (e) {
       _errorMessage = 'Gagal menghapus produk: $e';
       notifyListeners();
       return false;
+    }
+  }
+
+  Future<void> restoreProduct(String kode) async {
+    try {
+      await PosDatabaseService.instance.restoreProduct(kode);
+      await refreshAll();
+    } catch (e) {
+      _errorMessage = 'Gagal memulihkan produk: $e';
+      notifyListeners();
+    }
+  }
+
+  // --- Retur / Pembatalan Transaksi ---
+  Future<bool> cancelTransaction(String invoiceNo, {String? reason}) async {
+    try {
+      final ok = await PosDatabaseService.instance.cancelTransaction(invoiceNo, reason: reason);
+      if (ok) {
+        await refreshAll();
+      }
+      return ok;
+    } catch (e) {
+      _errorMessage = 'Gagal membatalkan transaksi: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  // --- Tutup Kas Harian (Laporan Z) ---
+  Future<PosDailyClosing?> closeDailyCash({String? notes, bool andPrint = true}) async {
+    try {
+      final closing = await PosDatabaseService.instance.saveDailyClosing(notes: notes);
+      if (andPrint) {
+        await PrinterService.instance.printDailyClosingReport(closing);
+      }
+      await refreshAll();
+      return closing;
+    } catch (e) {
+      _errorMessage = 'Gagal menyimpan tutup kas harian: $e';
+      notifyListeners();
+      return null;
+    }
+  }
+
+  // --- Backup & Restore Database ---
+  Future<bool> shareBackupDatabase() async {
+    try {
+      return await PosBackupService.instance.shareBackupDatabase();
+    } catch (e) {
+      _errorMessage = 'Gagal membuat backup database: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<String?> restoreDatabase() async {
+    try {
+      final error = await PosBackupService.instance.restoreDatabaseFromFile();
+      if (error == null) {
+        await refreshAll();
+      }
+      return error;
+    } catch (e) {
+      _errorMessage = 'Gagal memulihkan database: $e';
+      notifyListeners();
+      return e.toString();
     }
   }
 

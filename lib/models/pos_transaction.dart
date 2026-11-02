@@ -11,6 +11,8 @@ class PosTransactionItem {
   final double subtotal;
   final double profit;
   final String? penitip;
+  final bool isStockManaged;
+  final double dueToPenitip;
 
   PosTransactionItem({
     this.id,
@@ -25,6 +27,8 @@ class PosTransactionItem {
     required this.subtotal,
     required this.profit,
     this.penitip,
+    this.isStockManaged = true,
+    this.dueToPenitip = 0.0,
   });
 
   bool get isConsignment => penitip != null && penitip!.trim().isNotEmpty;
@@ -45,6 +49,8 @@ class PosTransactionItem {
       'subtotal': subtotal,
       'profit': profit,
       'penitip': penitip,
+      'is_stock_managed': isStockManaged ? 1 : 0,
+      'due_to_penitip': dueToPenitip,
     };
   }
 
@@ -62,6 +68,8 @@ class PosTransactionItem {
       subtotal: (map['subtotal'] is num) ? (map['subtotal'] as num).toDouble() : 0.0,
       profit: (map['profit'] is num) ? (map['profit'] as num).toDouble() : 0.0,
       penitip: map['penitip']?.toString(),
+      isStockManaged: map['is_stock_managed'] == null ? true : (map['is_stock_managed'] == 1 || map['is_stock_managed'] == true),
+      dueToPenitip: (map['due_to_penitip'] is num) ? (map['due_to_penitip'] as num).toDouble() : 0.0,
     );
   }
 }
@@ -80,6 +88,7 @@ class PosTransaction {
   final String paymentMethod;
   final String? cashierName;
   final String? note;
+  final String status; // 'COMPLETED', 'CANCELLED', 'RETURNED'
   final List<PosTransactionItem> items;
 
   PosTransaction({
@@ -96,8 +105,11 @@ class PosTransaction {
     this.paymentMethod = 'Tunai',
     this.cashierName = 'Kasir',
     this.note,
+    this.status = 'COMPLETED',
     this.items = const [],
   });
+
+  bool get isCancelled => status == 'CANCELLED';
 
   Map<String, dynamic> toMap() {
     return {
@@ -114,6 +126,7 @@ class PosTransaction {
       'payment_method': paymentMethod,
       'cashier_name': cashierName ?? 'Kasir',
       'note': note,
+      'status': status,
     };
   }
 
@@ -132,7 +145,64 @@ class PosTransaction {
       paymentMethod: map['payment_method']?.toString() ?? 'Tunai',
       cashierName: map['cashier_name']?.toString() ?? 'Kasir',
       note: map['note']?.toString(),
+      status: map['status']?.toString() ?? 'COMPLETED',
       items: items,
+    );
+  }
+}
+
+class PosDailyClosing {
+  final int? id;
+  final String closingDate; // YYYY-MM-DD
+  final int totalTransactions;
+  final double totalRevenue;
+  final double totalProfit;
+  final double cashRevenue;
+  final double nonCashRevenue;
+  final double consignmentDue;
+  final DateTime closedAt;
+  final String? notes;
+
+  PosDailyClosing({
+    this.id,
+    required this.closingDate,
+    required this.totalTransactions,
+    required this.totalRevenue,
+    required this.totalProfit,
+    required this.cashRevenue,
+    required this.nonCashRevenue,
+    required this.consignmentDue,
+    required this.closedAt,
+    this.notes,
+  });
+
+  Map<String, dynamic> toMap() {
+    return {
+      if (id != null) 'id': id,
+      'closing_date': closingDate,
+      'total_transactions': totalTransactions,
+      'total_revenue': totalRevenue,
+      'total_profit': totalProfit,
+      'cash_revenue': cashRevenue,
+      'non_cash_revenue': nonCashRevenue,
+      'consignment_due': consignmentDue,
+      'closed_at': closedAt.toIso8601String(),
+      'notes': notes,
+    };
+  }
+
+  factory PosDailyClosing.fromMap(Map<String, dynamic> map) {
+    return PosDailyClosing(
+      id: map['id'] as int?,
+      closingDate: map['closing_date']?.toString() ?? '',
+      totalTransactions: (map['total_transactions'] is num) ? (map['total_transactions'] as num).toInt() : 0,
+      totalRevenue: (map['total_revenue'] is num) ? (map['total_revenue'] as num).toDouble() : 0.0,
+      totalProfit: (map['total_profit'] is num) ? (map['total_profit'] as num).toDouble() : 0.0,
+      cashRevenue: (map['cash_revenue'] is num) ? (map['cash_revenue'] as num).toDouble() : 0.0,
+      nonCashRevenue: (map['non_cash_revenue'] is num) ? (map['non_cash_revenue'] as num).toDouble() : 0.0,
+      consignmentDue: (map['consignment_due'] is num) ? (map['consignment_due'] as num).toDouble() : 0.0,
+      closedAt: DateTime.tryParse(map['closed_at']?.toString() ?? '') ?? DateTime.now(),
+      notes: map['notes']?.toString(),
     );
   }
 }

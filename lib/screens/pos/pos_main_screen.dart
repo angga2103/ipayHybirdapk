@@ -1405,7 +1405,17 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                               ),
                             );
                             if (ok == true) {
-                              await pos.deleteProduct(p.kode);
+                              final wasHard = await pos.deleteOrArchiveProduct(p.kode);
+                              if (context.mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(wasHard
+                                        ? '✅ Produk ${p.nama} dihapus permanen.'
+                                        : '📦 Produk ${p.nama} memiliki riwayat transaksi, berhasil diarsipkan dengan aman.'),
+                                    backgroundColor: wasHard ? Colors.green : Colors.orange.shade800,
+                                  ),
+                                );
+                              }
                             }
                           },
                         ),
@@ -1421,86 +1431,223 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
     );
   }
 
-  // Dialog Tambah/Edit Produk Manual
+  // Dialog Tambah/Edit Produk Manual (POS 2.0: Stok Opsional & Model Komisi)
   void _openAddEditProductDialog(BuildContext context, PosProvider pos, {PosProduct? product}) {
     final kodeCtrl = TextEditingController(text: product?.kode ?? '');
     final namaCtrl = TextEditingController(text: product?.nama ?? '');
     final unitCtrl = TextEditingController(text: product?.unit ?? 'pcs');
-    final dasarCtrl = TextEditingController(text: product?.hargaDasar.toInt().toString() ?? '');
-    final jualCtrl = TextEditingController(text: product?.hargaJual.toInt().toString() ?? '');
-    final beratCtrl = TextEditingController(text: product?.beratGr.toInt().toString() ?? '0');
-    final stokCtrl = TextEditingController(text: product?.stok.toString() ?? '-1');
+    final dasarCtrl = TextEditingController(text: product != null ? product.hargaDasar.toInt().toString() : '');
+    final jualCtrl = TextEditingController(text: product != null ? product.hargaJual.toInt().toString() : '');
+    final beratCtrl = TextEditingController(text: product != null ? product.beratGr.toInt().toString() : '0');
+    final stokCtrl = TextEditingController(text: (product != null && product.isStockManaged && product.stok >= 0) ? product.stok.toString() : '10');
     final kategoriCtrl = TextEditingController(text: product?.kategori ?? 'Umum');
     final penitipCtrl = TextEditingController(text: product?.penitip ?? '');
+    final commValCtrl = TextEditingController(text: product != null && product.commissionValue > 0 ? product.commissionValue.toInt().toString() : '0');
+
+    bool isStockManaged = product?.isStockManaged ?? (product != null ? product.stok >= 0 : true);
+    String productType = product?.productType ?? ((product?.penitip != null && product!.penitip!.trim().isNotEmpty) ? 'consignment' : 'shop');
+    String commType = product?.commissionType ?? 'markup';
 
     showDialog(
       context: context,
       builder: (dCtx) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: Text(product == null ? 'Tambah Produk' : 'Edit Produk', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15)),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(controller: kodeCtrl, decoration: const InputDecoration(labelText: 'Kode / SKU Produk')),
-                TextField(controller: namaCtrl, decoration: const InputDecoration(labelText: 'Nama Produk')),
-                Row(
+        return StatefulBuilder(
+          builder: (context, setDlgState) {
+            final isConsignment = productType == 'consignment';
+
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              title: Text(
+                product == null ? 'Tambah Produk POS 2.0' : 'Edit Produk POS 2.0',
+                style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 15),
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(child: TextField(controller: unitCtrl, decoration: const InputDecoration(labelText: 'Satuan (pcs/cup/bks)'))),
-                    const SizedBox(width: 8),
-                    Expanded(child: TextField(controller: stokCtrl, decoration: const InputDecoration(labelText: 'Stok (-1 = Bebas)'))),
+                    TextField(controller: kodeCtrl, decoration: const InputDecoration(labelText: 'Kode / SKU Produk')),
+                    TextField(controller: namaCtrl, decoration: const InputDecoration(labelText: 'Nama Produk')),
+                    const SizedBox(height: 10),
+
+                    // Jenis Produk (Toko, Konsinyasi, Jasa)
+                    const Text('Jenis Produk:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF64748B))),
+                    const SizedBox(height: 4),
+                    DropdownButtonFormField<String>(
+                      initialValue: productType,
+                      decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8)),
+                      items: const [
+                        DropdownMenuItem(value: 'shop', child: Text('Barang Toko Sendiri')),
+                        DropdownMenuItem(value: 'consignment', child: Text('Titipan / Konsinyasi')),
+                        DropdownMenuItem(value: 'service', child: Text('Jasa / Layanan (Bebas Stok)')),
+                      ],
+                      onChanged: (val) {
+                        if (val == null) return;
+                        setDlgState(() {
+                          productType = val;
+                          if (val == 'service') {
+                            isStockManaged = false;
+                          }
+                        });
+                      },
+                    ),
+
+                    const SizedBox(height: 10),
+
+                    // Switch Kelola Stok
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Kelola Stok Produk', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                              Text(
+                                isStockManaged ? 'Stok dihitung & berkurang saat terjual' : 'Bebas stok (tanpa batas / makanan & jasa)',
+                                style: TextStyle(fontSize: 10, color: isStockManaged ? AppConfig.primaryTeal : Colors.orange.shade800),
+                              ),
+                            ],
+                          ),
+                          Switch(
+                            value: isStockManaged,
+                            activeTrackColor: AppConfig.primaryTeal.withValues(alpha: 0.5),
+                            activeThumbColor: AppConfig.primaryTeal,
+                            onChanged: (val) {
+                              setDlgState(() {
+                                isStockManaged = val;
+                              });
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+
+                    const SizedBox(height: 10),
+
+                    Row(
+                      children: [
+                        Expanded(child: TextField(controller: unitCtrl, decoration: const InputDecoration(labelText: 'Satuan (pcs/cup/bks)'))),
+                        const SizedBox(width: 8),
+                        if (isStockManaged)
+                          Expanded(child: TextField(controller: stokCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Jumlah Stok')))
+                        else
+                          const Expanded(
+                            child: Padding(
+                              padding: EdgeInsets.only(top: 14),
+                              child: Text('Stok: Bebas (∞)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF64748B))),
+                            ),
+                          ),
+                      ],
+                    ),
+
+                    Row(
+                      children: [
+                        Expanded(child: TextField(controller: dasarCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Harga Dasar (Modal)'))),
+                        const SizedBox(width: 8),
+                        Expanded(child: TextField(controller: jualCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Harga Jual'))),
+                      ],
+                    ),
+
+                    Row(
+                      children: [
+                        Expanded(child: TextField(controller: beratCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Berat (gram)'))),
+                        const SizedBox(width: 8),
+                        Expanded(child: TextField(controller: kategoriCtrl, decoration: const InputDecoration(labelText: 'Kategori'))),
+                      ],
+                    ),
+
+                    // Pengaturan Konsinyasi Khusus
+                    if (isConsignment) ...[
+                      const SizedBox(height: 12),
+                      Container(
+                        padding: const EdgeInsets.all(10),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.shade50,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.amber.shade200),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text('Pengaturan Mitra Titipan (Konsinyasi)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF78350F))),
+                            TextField(
+                              controller: penitipCtrl,
+                              decoration: const InputDecoration(labelText: 'Nama Penitip / Vendor'),
+                            ),
+                            const SizedBox(height: 6),
+                            const Text('Model Pembagian Komisi Toko:', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF78350F))),
+                            DropdownButtonFormField<String>(
+                              initialValue: commType,
+                              decoration: const InputDecoration(contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 4)),
+                              items: const [
+                                DropdownMenuItem(value: 'markup', child: Text('Markup (Selisih Harga Jual - Modal)', style: TextStyle(fontSize: 11))),
+                                DropdownMenuItem(value: 'nominal', child: Text('Komisi Nominal Tetap (Rp per pcs)', style: TextStyle(fontSize: 11))),
+                                DropdownMenuItem(value: 'percent', child: Text('Komisi Persentase (% dari Penjualan)', style: TextStyle(fontSize: 11))),
+                              ],
+                              onChanged: (v) {
+                                if (v != null) setDlgState(() => commType = v);
+                              },
+                            ),
+                            if (commType != 'markup')
+                              TextField(
+                                controller: commValCtrl,
+                                keyboardType: TextInputType.number,
+                                decoration: InputDecoration(
+                                  labelText: commType == 'nominal' ? 'Nominal Komisi Toko (Rp)' : 'Persentase Komisi Toko (%)',
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ],
                 ),
-                Row(
-                  children: [
-                    Expanded(child: TextField(controller: dasarCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Harga Dasar (Modal)'))),
-                    const SizedBox(width: 8),
-                    Expanded(child: TextField(controller: jualCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Harga Jual'))),
-                  ],
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(dCtx), child: const Text('Batal')),
+                ElevatedButton(
+                  onPressed: () async {
+                    if (kodeCtrl.text.isEmpty || namaCtrl.text.isEmpty) return;
+                    final parsedStok = isStockManaged ? (int.tryParse(stokCtrl.text) ?? 0) : -1;
+                    final newP = PosProduct(
+                      id: product?.id,
+                      kode: kodeCtrl.text.trim(),
+                      nama: namaCtrl.text.trim(),
+                      unit: unitCtrl.text.trim().isEmpty ? 'pcs' : unitCtrl.text.trim(),
+                      hargaDasar: double.tryParse(dasarCtrl.text) ?? 0.0,
+                      hargaJual: double.tryParse(jualCtrl.text) ?? 0.0,
+                      beratGr: double.tryParse(beratCtrl.text) ?? 0.0,
+                      stok: parsedStok,
+                      isStockManaged: isStockManaged,
+                      kategori: kategoriCtrl.text.trim().isEmpty ? 'Umum' : kategoriCtrl.text.trim(),
+                      penitip: isConsignment && penitipCtrl.text.trim().isNotEmpty ? penitipCtrl.text.trim() : null,
+                      productType: productType,
+                      commissionType: commType,
+                      commissionValue: double.tryParse(commValCtrl.text) ?? 0.0,
+                    );
+                    await pos.saveProduct(newP);
+                    if (dCtx.mounted) Navigator.pop(dCtx);
+                  },
+                  style: ElevatedButton.styleFrom(backgroundColor: AppConfig.primaryTeal, foregroundColor: Colors.white),
+                  child: const Text('Simpan'),
                 ),
-                Row(
-                  children: [
-                    Expanded(child: TextField(controller: beratCtrl, keyboardType: TextInputType.number, decoration: const InputDecoration(labelText: 'Berat (gram)'))),
-                    const SizedBox(width: 8),
-                    Expanded(child: TextField(controller: kategoriCtrl, decoration: const InputDecoration(labelText: 'Kategori'))),
-                  ],
-                ),
-                TextField(controller: penitipCtrl, decoration: const InputDecoration(labelText: 'Nama Penitip (Kosongkan jika milik sendiri)')),
               ],
-            ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(dCtx), child: const Text('Batal')),
-            ElevatedButton(
-              onPressed: () async {
-                if (kodeCtrl.text.isEmpty || namaCtrl.text.isEmpty) return;
-                final newP = PosProduct(
-                  id: product?.id,
-                  kode: kodeCtrl.text.trim(),
-                  nama: namaCtrl.text.trim(),
-                  unit: unitCtrl.text.trim().isEmpty ? 'pcs' : unitCtrl.text.trim(),
-                  hargaDasar: double.tryParse(dasarCtrl.text) ?? 0.0,
-                  hargaJual: double.tryParse(jualCtrl.text) ?? 0.0,
-                  beratGr: double.tryParse(beratCtrl.text) ?? 0.0,
-                  stok: int.tryParse(stokCtrl.text) ?? -1,
-                  kategori: kategoriCtrl.text.trim().isEmpty ? 'Umum' : kategoriCtrl.text.trim(),
-                  penitip: penitipCtrl.text.trim().isNotEmpty ? penitipCtrl.text.trim() : null,
-                );
-                await pos.saveProduct(newP);
-                if (dCtx.mounted) Navigator.pop(dCtx);
-              },
-              style: ElevatedButton.styleFrom(backgroundColor: AppConfig.primaryTeal, foregroundColor: Colors.white),
-              child: const Text('Simpan'),
-            ),
-          ],
+            );
+          },
         );
       },
     );
   }
 
   // =========================================================================
-  // TAB 4: RIWAYAT PENJUALAN & LABA BERSIH
+  // TAB 4: RIWAYAT PENJUALAN, TUTUP KAS HARIAN & BACKUP
   // =========================================================================
   Widget _buildHistoryReportTab(PosProvider pos) {
     final stats = pos.todayStats;
@@ -1523,8 +1670,129 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
               _buildStatCard('Omset Hari Ini', stats['total_omset'] ?? 0.0, const Color(0xFF0F172A)),
               _buildStatCard('Estimasi Laba Bersih', stats['total_profit'] ?? 0.0, const Color(0xFF047857)),
               _buildStatCard('Hak Konsinyasi', stats['total_consignment_due'] ?? 0.0, Colors.amber.shade900),
-              _buildStatCard('Total Diskon Dinamis', stats['total_discount'] ?? 0.0, Colors.purple.shade700),
+              _buildStatCard('Kas Masuk (Tunai)', stats['cash_omset'] ?? 0.0, Colors.blue.shade800),
             ],
+          ),
+
+          const SizedBox(height: 14),
+
+          // Tombol Tindakan Utama: Cetak Rekap Kas Harian (Laporan Z)
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  icon: const Icon(Icons.print, size: 18),
+                  label: const Text('Cetak Rekap Kas Harian (Laporan Z)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppConfig.primaryTeal,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  onPressed: () async {
+                    final closing = await pos.closeDailyCash(andPrint: true);
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(closing != null
+                              ? '✅ Struk Rekap Kas Harian berhasil dicetak ke printer!'
+                              : '⚠️ Gagal mencetak rekap kas harian.'),
+                        ),
+                      );
+                    }
+                  },
+                ),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 14),
+
+          // Card Cadangan & Pemulihan Data (Backup & Restore)
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.shield_outlined, size: 18, color: AppConfig.primaryTeal),
+                    const SizedBox(width: 6),
+                    const Text('Cadangan & Pemulihan Data', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900)),
+                  ],
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '100% Offline • Simpan cadangan database ke memori HP atau bagikan via WhatsApp / Google Drive',
+                  style: TextStyle(fontSize: 10.5, color: Colors.grey.shade600),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.share, size: 16),
+                        label: const Text('Cadangkan Data', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                        style: OutlinedButton.styleFrom(
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        onPressed: () async {
+                          final ok = await pos.shareBackupDatabase();
+                          if (mounted && !ok) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('⚠️ Gagal membuat file cadangan database.')),
+                            );
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: OutlinedButton.icon(
+                        icon: const Icon(Icons.restore, size: 16),
+                        label: const Text('Pulihkan Data', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                        style: OutlinedButton.styleFrom(
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        onPressed: () async {
+                          final confirm = await showDialog<bool>(
+                            context: context,
+                            builder: (d) => AlertDialog(
+                              title: const Text('Pulihkan Database?'),
+                              content: const Text(
+                                  'Memulihkan database akan menimpa data kasir saat ini dengan file cadangan yang Anda pilih. Pastikan Anda memilih file yang benar.\n\nLanjutkan?'),
+                              actions: [
+                                TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Batal')),
+                                TextButton(
+                                  onPressed: () => Navigator.pop(d, true),
+                                  child: const Text('Pilih File Cadangan', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                                ),
+                              ],
+                            ),
+                          );
+                          if (confirm == true) {
+                            final err = await pos.restoreDatabase();
+                            if (mounted) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(err == null ? '✅ Database kasir berhasil dipulihkan!' : '⚠️ $err'),
+                                  backgroundColor: err == null ? Colors.green : Colors.red,
+                                ),
+                              );
+                            }
+                          }
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
           ),
 
           const SizedBox(height: 20),
@@ -1549,7 +1817,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
               ),
             )
           else
-            ...trxs.map((t) => _buildTransactionCard(context, pos, t)),
+            ...trxs.map((t) => _buildTransactionCard(pos, t)),
         ],
       ),
     );
@@ -1578,14 +1846,16 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
     );
   }
 
-  Widget _buildTransactionCard(BuildContext context, PosProvider pos, PosTransaction trx) {
+  Widget _buildTransactionCard(PosProvider pos, PosTransaction trx) {
+    final isCancelled = trx.isCancelled;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        border: Border.all(color: isCancelled ? Colors.red.shade200 : const Color(0xFFE2E8F0)),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1593,7 +1863,31 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(trx.invoiceNo, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w900, color: Color(0xFF0F172A))),
+              Row(
+                children: [
+                  Text(
+                    trx.invoiceNo,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w900,
+                      color: isCancelled ? Colors.red.shade700 : const Color(0xFF0F172A),
+                      decoration: isCancelled ? TextDecoration.lineThrough : null,
+                    ),
+                  ),
+                  if (isCancelled) ...[
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(color: Colors.red.shade300),
+                      ),
+                      child: Text('BATAL', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.red.shade700)),
+                    ),
+                  ],
+                ],
+              ),
               const SizedBox(height: 2),
               Text(
                 '${trx.dateTime.hour.toString().padLeft(2, '0')}:${trx.dateTime.minute.toString().padLeft(2, '0')} • ${trx.items.length} Item • Laba: ${_currencyFormat.format(trx.profitAmount)}',
@@ -1605,21 +1899,50 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
             children: [
               Text(
                 _currencyFormat.format(trx.totalAmount),
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: AppConfig.primaryTeal),
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: isCancelled ? Colors.grey : AppConfig.primaryTeal),
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: 4),
               IconButton(
                 icon: const Icon(Icons.print_outlined, size: 20, color: Color(0xFF475569)),
                 tooltip: 'Cetak Ulang Struk',
                 onPressed: () async {
                   final ok = await pos.printReceipt(trx);
-                  if (context.mounted) {
+                  if (mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
                       SnackBar(content: Text(ok ? '✅ Struk ${trx.invoiceNo} dicetak ulang!' : '⚠️ Gagal mencetak.')),
                     );
                   }
                 },
               ),
+              if (!isCancelled)
+                IconButton(
+                  icon: const Icon(Icons.cancel_outlined, size: 18, color: Colors.red),
+                  tooltip: 'Batalkan / Retur Transaksi',
+                  onPressed: () async {
+                    final confirm = await showDialog<bool>(
+                      context: context,
+                      builder: (d) => AlertDialog(
+                        title: const Text('Batalkan Transaksi?'),
+                        content: Text('Batalkan nota ${trx.invoiceNo}?\nStok produk yang dikelola akan otomatis dikembalikan ke etalase.'),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Tutup')),
+                          TextButton(
+                            onPressed: () => Navigator.pop(d, true),
+                            child: const Text('Ya, Batalkan', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (confirm == true) {
+                      final ok = await pos.cancelTransaction(trx.invoiceNo, reason: 'Pembatalan Kasir');
+                      if (mounted) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(content: Text(ok ? '✅ Transaksi ${trx.invoiceNo} berhasil dibatalkan.' : '⚠️ Gagal membatalkan transaksi.')),
+                        );
+                      }
+                    }
+                  },
+                ),
             ],
           ),
         ],
