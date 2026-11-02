@@ -78,21 +78,25 @@ jobs:
           body: |
             ## 📱 GarudaTel iPay - Mobile POS (${{ steps.vars.outputs.tag }})
 
-            Aplikasi Android Native Hybrid resmi untuk **GarudaTel iPay (https://ipay.my.id)** dengan integrasi hardware kasir offline-first.
+            Aplikasi Android Native Hybrid resmi untuk **GarudaTel iPay (https://ipay.my.id)** dengan integrasi hardware kasir offline-first dan sistem POS mandiri.
 
-            ### 🌟 Fitur Unggulan (Bluetooth Thermal POS Printer):
-            - **Dukungan Printer Kasir Mini Thermal**:
-              - Ukuran kertas: **58 mm** (32 karakter) & **80 mm** (48 karakter).
-              - Kompatibel dengan berbagai printer: RPP02N, Goojprt, Panda, Iware, VSC, MiniPOS, Zjiang, dsb.
-              - Format 2 kolom presisi rata kiri-kanan otomatis (`_formatTwoColumns`).
-              - Cetak logo toko raster hitam-putih (`imageRaster`).
-              - Cetak hemat kertas (*paper-saving feed 1 baris*).
-              - Tombol **Test Print** instan untuk memastikan koneksi printer.
-              - Fitur sambung manual via MAC Address jika printer menyembunyikan nama.
-            - **Layar Pengaturan Kasir Mandiri**:
-              - Status koneksi real-time (hijau saat terhubung / abu-abu saat belum).
-              - Akses mandiri kasir tanpa perlu PIN Owner.
-              - Tombol pintas **[Kasir Web]** di pojok kanan atas untuk langsung bertransaksi di web kasir PPOB.
+            ### 🌟 Fitur Baru di Versi ${{ steps.vars.outputs.tag }}:
+            - **Sistem Kasir POS Offline-First (Penyimpanan Memori HP)**:
+              - Database lokal SQLite cepat, aman, dan tanpa perlu kuota/internet.
+              - Akses instan dari tombol kasir utama di bilah navigasi bawah.
+              - Pencarian produk kilat dengan filter kategori dan barcode tanpa lag.
+              - **Harga Jual Dinamis di Kasir**: Kasir dapat mengubah harga saat transaksi (untuk diskon manual/grosir) dilengkapi peringatan jika di bawah modal, serta riwayat audit lengkap.
+            - **Manajemen Produk & Excel**:
+              - Import & Export produk mudah via file Excel (.xlsx) dengan 8 kolom standar (`KODE`, `NAMA PRODUK`, `UNIT`, `HARGA DASAR`, `HARGA JUAL`, `BERAT`, `STOK`, `KATEGORI`) + info `PENITIP`.
+              - Download template Excel contoh langsung dari HP.
+            - **Sistem Konsinyasi (Titip Jual) & Laporan Bagi Hasil**:
+              - Pencatatan stok barang titipan dan pemilik barang.
+              - Pembagian bagi hasil dan cetak struk penyelesaian konsinyasi ke printer thermal.
+            - **Bluetooth Thermal POS Printer 58mm & 80mm**:
+              - Format 2 kolom presisi rata kiri-kanan otomatis.
+              - Cetak logo toko raster hitam-putih presisi dan jernih.
+              - Mode hemat kertas (paper-saving 1 baris feed).
+              - Tes koneksi & sambung printer via nama atau MAC Address manual.
 
             ---
             ### 📥 Download File APK:
@@ -101,7 +105,7 @@ jobs:
             - 🔹 **IPAY-${{ steps.vars.outputs.tag }}.apk** (Versi rilis ${{ steps.vars.outputs.tag }})
           files: |
             release-files/IPAY-release.apk
-            release-files/IPAY-*.apk
+            release-files/IPAY-${{ steps.vars.outputs.tag }}.apk
           draft: false
           prerelease: false
         env:
