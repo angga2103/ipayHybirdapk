@@ -10,7 +10,8 @@ class AppConfig {
 
   /// Identitas Aplikasi
   static const String appName = 'IPAY';
-  static const String appVersion = '1.0.4';
+  static const String appVersion = '1.0.7';
+  static const String baseUrl = 'https://ipay.my.id';
 
   /// Warna Khas GarudaTel (taste_guidelines.md)
   static const Color primaryTeal = Color(0xFF008779);

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'config/app_config.dart';
+import 'providers/pos_provider.dart';
 import 'providers/printer_provider.dart';
 import 'screens/webview_screen.dart';
 import 'screens/printer_settings_screen.dart';
@@ -29,6 +30,7 @@ void main() async {
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => PrinterProvider()),
+        ChangeNotifierProvider(create: (_) => PosProvider()..init()),
       ],
       child: const GarudaTelApp(),
     ),

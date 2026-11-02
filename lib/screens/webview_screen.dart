@@ -8,6 +8,7 @@ import '../config/app_config.dart';
 import '../services/fcm_service.dart';
 import '../services/printer_service.dart';
 import '../services/storage_service.dart';
+import 'pos/pos_main_screen.dart';
 import 'printer_settings_screen.dart';
 
 class WebViewScreen extends StatefulWidget {
@@ -79,6 +80,15 @@ class _WebViewScreenState extends State<WebViewScreen> {
               return NavigationDecision.prevent;
             }
 
+            // 4. CEGAT URL KASIR POS UNTUK MEMBUKA POS OFFLINE NATIVE
+            if (url.contains('/pos') || url.contains('launch_web_pos')) {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const PosMainScreen()),
+              );
+              return NavigationDecision.prevent;
+            }
+
             return NavigationDecision.navigate;
           },
           onPageFinished: (String url) async {
@@ -94,6 +104,13 @@ class _WebViewScreenState extends State<WebViewScreen> {
                 window.openPrinterSettings = function() {
                   if (window.PrintChannel) {
                     window.PrintChannel.postMessage(JSON.stringify({ type: 'open_settings' }));
+                  }
+                };
+
+                // Polyfill global openPosScreen (Kasir Offline Native)
+                window.openPosScreen = function() {
+                  if (window.PrintChannel) {
+                    window.PrintChannel.postMessage(JSON.stringify({ type: 'open_pos', action: 'open_pos' }));
                   }
                 };
 
@@ -156,6 +173,15 @@ class _WebViewScreenState extends State<WebViewScreen> {
                   }
                   return _origOpen ? _origOpen.apply(this, arguments) : null;
                 };
+
+                // 6. Hubungkan tombol Kasir di bottom nav atau sidebar ke POS Offline Native
+                document.querySelectorAll('a[href*="/pos"], .nav-fab, .sidebar-item[href*="/pos"]').forEach(function(el) {
+                  el.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    window.openPosScreen();
+                  });
+                });
               })();
             """);
 
@@ -185,6 +211,13 @@ class _WebViewScreenState extends State<WebViewScreen> {
               Navigator.push(
                 context,
                 MaterialPageRoute(builder: (_) => const PrinterSettingsScreen()),
+              );
+              return;
+            }
+            if (decoded is Map && (decoded['type'] == 'open_pos' || decoded['action'] == 'open_pos')) {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const PosMainScreen()),
               );
               return;
             }

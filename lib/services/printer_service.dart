@@ -13,6 +13,8 @@ import 'package:printing/printing.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../config/app_config.dart';
+import '../models/pos_transaction.dart';
+import 'pos_database_service.dart';
 import 'storage_service.dart';
 
 /// Model Struk Transaksi yang dikirim dari Web via PrintChannel
@@ -117,8 +119,14 @@ class StrukPayload {
     // 2. Unduh dari URL jika ada
     if (logoUrl != null && logoUrl!.isNotEmpty) {
       try {
-        final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
-        final request = await client.getUrl(Uri.parse(logoUrl!));
+        String targetUrl = logoUrl!.trim();
+        if (targetUrl.startsWith('/')) {
+          targetUrl = '${AppConfig.baseUrl}$targetUrl';
+        }
+        final client = HttpClient()
+          ..badCertificateCallback = ((cert, host, port) => true)
+          ..connectionTimeout = const Duration(seconds: 5);
+        final request = await client.getUrl(Uri.parse(targetUrl));
         final response = await request.close();
         if (response.statusCode == 200) {
           final bytes = await consolidateHttpClientResponseBytes(response);
@@ -160,10 +168,10 @@ class StrukPayload {
   /// Memproses logo yang diekstrak langsung dari DOM WebView (Base64 atau URL HTTP)
   Future<void> attachExtractedLogo(String dataOrUrl) async {
     try {
-      final clean = dataOrUrl.trim();
+      String clean = dataOrUrl.trim().replaceAll('"', '').replaceAll("'", '');
       if (clean.isEmpty || clean == 'null') return;
 
-      if (clean.startsWith('data:image') || (clean.length > 100 && !clean.startsWith('http'))) {
+      if (clean.startsWith('data:image') || (clean.length > 100 && !clean.startsWith('http') && !clean.startsWith('/'))) {
         String cleanB64 = clean;
         if (cleanB64.contains(',')) {
           cleanB64 = cleanB64.split(',').last;
@@ -174,16 +182,22 @@ class StrukPayload {
           await PrinterService.instance.cacheStoreLogo(bytes);
           debugPrint('[StrukPayload] Berhasil mengekstrak dan menyimpan cache logo Base64');
         }
-      } else if (clean.startsWith('http')) {
-        final client = HttpClient()..connectionTimeout = const Duration(seconds: 4);
-        final request = await client.getUrl(Uri.parse(clean));
+      } else if (clean.startsWith('http') || clean.startsWith('/')) {
+        String targetUrl = clean;
+        if (targetUrl.startsWith('/')) {
+          targetUrl = '${AppConfig.baseUrl}$targetUrl';
+        }
+        final client = HttpClient()
+          ..badCertificateCallback = ((cert, host, port) => true)
+          ..connectionTimeout = const Duration(seconds: 5);
+        final request = await client.getUrl(Uri.parse(targetUrl));
         final response = await request.close();
         if (response.statusCode == 200) {
           final bytes = await consolidateHttpClientResponseBytes(response);
           if (bytes.isNotEmpty) {
             cachedLogoBytes = bytes;
             await PrinterService.instance.cacheStoreLogo(bytes);
-            debugPrint('[StrukPayload] Berhasil download dan simpan cache logo dari URL: $clean');
+            debugPrint('[StrukPayload] Berhasil download dan simpan cache logo dari URL: $targetUrl');
           }
         }
       }
@@ -727,6 +741,155 @@ class PrinterService {
       return await PrintBluetoothThermal.writeBytes(bytes);
     } catch (e) {
       debugPrint('[PrinterService] Error printReceipt: $e');
+      return false;
+    }
+  }
+
+  /// Cetak Struk Transaksi POS Offline Lengkap
+  Future<bool> printPosTransaction(
+    PosTransaction trx, {
+    String? storeName,
+    String? address,
+    String? phone,
+  }) async {
+    final logoEnabled = await isLogoPrintEnabled();
+    Uint8List? logoBytes;
+    if (logoEnabled) {
+      logoBytes = await getCachedStoreLogo();
+      if (logoBytes == null || logoBytes.isEmpty) {
+        try {
+          final byteData = await rootBundle.load('assets/icon/app_logo.png');
+          logoBytes = byteData.buffer.asUint8List();
+        } catch (_) {}
+      }
+    }
+
+    final itemsFormatted = trx.items.map((it) {
+      final isModified = (it.normalPrice - it.soldPrice).abs() > 0.001;
+      return {
+        'name': it.productName,
+        'qty': it.qty,
+        'unit': it.unit,
+        'price': 'Rp ${it.soldPrice.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]}.')}',
+        'subtotal': 'Rp ${it.subtotal.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]}.')}',
+        'note': isModified ? (it.isBelowCost ? 'Bawah Modal' : 'Diskon Khusus') : null,
+      };
+    }).toList();
+
+    String formatRp(double val) {
+      return 'Rp ${val.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]}.')}';
+    }
+
+    final dateFormatted = '${trx.dateTime.day.toString().padLeft(2, '0')}/${trx.dateTime.month.toString().padLeft(2, '0')}/${trx.dateTime.year} ${trx.dateTime.hour.toString().padLeft(2, '0')}:${trx.dateTime.minute.toString().padLeft(2, '0')}';
+
+    return await printReceipt(
+      storeName: storeName ?? 'GARUDATEL POS',
+      address: address ?? 'Pusat Pembayaran PPOB & Kasir Toko',
+      phone: phone,
+      orderNo: trx.invoiceNo,
+      date: dateFormatted,
+      cashierName: trx.cashierName,
+      items: itemsFormatted,
+      subtotal: formatRp(trx.normalAmount > 0 ? trx.normalAmount : trx.totalAmount),
+      discount: trx.discountAmount > 0 ? formatRp(trx.discountAmount) : null,
+      total: formatRp(trx.totalAmount),
+      paymentMethod: trx.paymentMethod,
+      cashReceived: formatRp(trx.cashPaid),
+      change: formatRp(trx.changeDue),
+      footerMessage: 'Terima kasih atas kunjungan Anda!\nBarang yang dibeli tidak dapat ditukar.',
+      logoBytes: logoBytes,
+    );
+  }
+
+  /// Cetak Struk Rekap Setoran Konsinyasi (Bagi Hasil)
+  Future<bool> printConsignmentReport(
+    ConsignmentSummary summary, {
+    String? storeName,
+  }) async {
+    try {
+      final isConnected = await checkConnectionStatus();
+      if (!isConnected) {
+        final savedMac = await getSavedMac();
+        if (savedMac != null && savedMac.isNotEmpty) {
+          final ok = await connect(savedMac);
+          if (!ok) return false;
+        } else {
+          return false;
+        }
+      }
+
+      final profile = await CapabilityProfile.load();
+      final generator = Generator(_paperSize, profile);
+      List<int> bytes = [];
+
+      bytes += generator.reset();
+
+      // Logo
+      final logoEnabled = await isLogoPrintEnabled();
+      if (logoEnabled) {
+        Uint8List? logoBytes = await getCachedStoreLogo();
+        if (logoBytes == null || logoBytes.isEmpty) {
+          try {
+            final byteData = await rootBundle.load('assets/icon/app_logo.png');
+            logoBytes = byteData.buffer.asUint8List();
+          } catch (_) {}
+        }
+        if (logoBytes != null && logoBytes.isNotEmpty) {
+          final logoRaster = processLogoRaster(logoBytes, generator);
+          if (logoRaster.isNotEmpty) bytes += logoRaster;
+        }
+      }
+
+      String formatRp(double val) {
+        return 'Rp ${val.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]}.')}';
+      }
+
+      final now = DateTime.now();
+      final dateStr = '${now.day.toString().padLeft(2, '0')}/${now.month.toString().padLeft(2, '0')}/${now.year} ${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+
+      // Header Rekap
+      bytes += generator.text(
+        'REKAP SETORAN KONSINYASI',
+        styles: const PosStyles(align: PosAlign.center, bold: true, height: PosTextSize.size1, width: PosTextSize.size1),
+      );
+      bytes += generator.text(
+        'Mitra: ${summary.penitip.toUpperCase()}',
+        styles: const PosStyles(align: PosAlign.center, bold: true),
+      );
+      bytes += generator.text(dividerLine, styles: const PosStyles(align: PosAlign.center));
+
+      bytes += generator.text(formatTwoColumns('Tanggal', dateStr));
+      bytes += generator.text(formatTwoColumns('Varian Titipan', '${summary.variantCount} Item'));
+      bytes += generator.text(formatTwoColumns('Total Terjual', '${summary.totalSoldQty} pcs'));
+      bytes += generator.text(formatTwoColumns('Sisa Stok Toko', '${summary.totalStock} pcs'));
+      bytes += generator.text(dividerLine, styles: const PosStyles(align: PosAlign.center));
+
+      bytes += generator.text(formatTwoColumns('Total Omset Kotor', formatRp(summary.totalGross)));
+      bytes += generator.text(formatTwoColumns('Komisi Toko', formatRp(summary.storeFee)));
+      bytes += generator.text(dividerLine, styles: const PosStyles(align: PosAlign.center));
+
+      bytes += generator.text(
+        formatTwoColumns('HAK SETOR PENITIP', formatRp(summary.totalDueToPenitip)),
+        styles: const PosStyles(bold: true),
+      );
+      if (summary.totalSettled > 0) {
+        bytes += generator.text(formatTwoColumns('Sudah Disetor', formatRp(summary.totalSettled)));
+        bytes += generator.text(formatTwoColumns('Sisa Belum Setor', formatRp(summary.remainingDue)));
+      }
+
+      bytes += generator.text(dividerLine, styles: const PosStyles(align: PosAlign.center));
+      bytes += generator.feed(1);
+
+      // Tanda Tangan
+      bytes += generator.text(formatTwoColumns('(   Penitip   )', '(    Kasir    )'));
+      bytes += generator.feed(2);
+      if (_paperSize == PaperSize.mm80) {
+        bytes += generator.cut();
+      }
+
+      return await PrintBluetoothThermal.writeBytes(bytes);
+    } catch (e) {
+      debugPrint('[PrinterService] Error printConsignmentReport: $e');
       return false;
     }
   }

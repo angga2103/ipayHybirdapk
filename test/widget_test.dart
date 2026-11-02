@@ -2,7 +2,10 @@ import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:mobile_flutter/config/app_config.dart';
+import 'package:mobile_flutter/models/pos_cart_item.dart';
+import 'package:mobile_flutter/models/pos_product.dart';
 import 'package:mobile_flutter/providers/printer_provider.dart';
+import 'package:mobile_flutter/services/pos_excel_service.dart';
 import 'package:mobile_flutter/services/printer_service.dart';
 import 'package:mobile_flutter/services/storage_service.dart';
 
@@ -132,6 +135,71 @@ void main() {
       final provider = PrinterProvider();
       await provider.setPaperSize(PaperSize.mm80);
       expect(provider.paperSize, equals(PaperSize.mm80));
+    });
+  });
+
+  group('Offline POS & Excel Models Tests', () {
+    test('PosProduct model parses and converts to Map correctly', () {
+      final p = PosProduct(
+        id: 1,
+        kode: 'BRG-001',
+        nama: 'Kopi Susu Aren Botol',
+        unit: 'botol',
+        hargaDasar: 10000,
+        hargaJual: 15000,
+        beratGr: 250,
+        stok: 20,
+        kategori: 'Minuman',
+        penitip: 'Dapur Bu Siti',
+      );
+
+      expect(p.isConsignment, isTrue);
+      expect(p.isUnlimitedStock, isFalse);
+      expect(p.profitMargin, equals(5000));
+
+      final map = p.toMap();
+      expect(map['kode'], equals('BRG-001'));
+      expect(map['penitip'], equals('Dapur Bu Siti'));
+
+      final fromMap = PosProduct.fromMap(map);
+      expect(fromMap.nama, equals('Kopi Susu Aren Botol'));
+      expect(fromMap.hargaJual, equals(15000));
+    });
+
+    test('PosCartItem calculates dynamic price, discount, profit, and below-cost alert', () {
+      final p = PosProduct(
+        kode: 'BRG-002',
+        nama: 'Keripik Tempe Renyah',
+        unit: 'bks',
+        hargaDasar: 8000,
+        hargaJual: 12000,
+        beratGr: 100,
+        stok: 10,
+        kategori: 'Snack',
+      );
+
+      final cartItem = PosCartItem(product: p, qty: 2);
+      expect(cartItem.subtotal, equals(24000));
+      expect(cartItem.isPriceModified, isFalse);
+      expect(cartItem.isBelowCost, isFalse);
+
+      // Ubah harga jual dinamis menjadi harga grosir (misal 10.000 / bks)
+      cartItem.actualPrice = 10000;
+      expect(cartItem.isPriceModified, isTrue);
+      expect(cartItem.subtotal, equals(20000));
+      expect(cartItem.discountAmount, equals(4000));
+      expect(cartItem.profitAmount, equals(4000));
+      expect(cartItem.isBelowCost, isFalse);
+
+      // Jual rugi / cuci gudang di bawah modal (misal 7.000 / bks)
+      cartItem.actualPrice = 7000;
+      expect(cartItem.isBelowCost, isTrue);
+      expect(cartItem.profitAmount, equals(-2000));
+    });
+
+    test('PosExcelService generates valid Excel template bytes', () {
+      final bytes = PosExcelService.instance.generateTemplateBytes();
+      expect(bytes.isNotEmpty, isTrue);
     });
   });
 }

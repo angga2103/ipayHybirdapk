@@ -2,7 +2,7 @@ name: mobile_flutter
 description: "A new Flutter project."
 publish_to: 'none'
 
-version: 1.0.6+7
+version: 1.0.7+8
 
 environment:
   sdk: ^3.13.4
@@ -27,10 +27,20 @@ dependencies:
   firebase_core: ^3.12.1
   firebase_messaging: ^15.2.4
 
+  # Offline POS & Excel Database
+  sqflite: ^2.3.3+1
+  path: ^1.9.0
+  path_provider: ^2.1.2
+  excel: ^4.0.3
+  file_picker: ^8.1.4
+  share_plus: ^10.1.2
+  intl: ^0.19.0
+
 dependency_overrides:
   shared_preferences_android: 2.3.4
   path_provider_android: 2.2.15
   permission_handler_android: 12.0.13
+  xml: ^7.0.1
 
 dev_dependencies:
   flutter_test:
