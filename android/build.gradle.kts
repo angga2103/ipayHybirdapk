@@ -16,15 +16,8 @@ subprojects {
     project.layout.buildDirectory.value(newSubprojectBuildDir)
 
     plugins.withId("com.android.library") {
-        extensions.findByType(com.android.build.gradle.LibraryExtension::class.java)?.let {
-            it.compileSdk = 36
-        }
-    }
-
-    tasks.configureEach {
-        if (name.contains("aarMetadata", ignoreCase = true)) {
-            enabled = false
-            onlyIf { false }
+        extensions.configure<com.android.build.api.dsl.LibraryExtension> {
+            compileSdk = 36
         }
     }
 }
