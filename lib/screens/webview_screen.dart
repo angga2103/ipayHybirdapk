@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 import '../config/app_config.dart';
+import '../services/app_update_service.dart';
 import '../services/fcm_service.dart';
 import '../services/printer_service.dart';
 import '../services/storage_service.dart';
@@ -187,6 +188,15 @@ class _WebViewScreenState extends State<WebViewScreen> {
 
             // Injeksi FCM Token ke sesi Web
             await FcmService.instance.injectTokenToWeb(controller);
+
+            // Periksa pembaruan aplikasi di background (silent)
+            if (mounted) {
+              Future.delayed(const Duration(seconds: 2), () {
+                if (mounted) {
+                  AppUpdateService().checkForUpdate(context, silent: true);
+                }
+              });
+            }
           },
           onWebResourceError: (WebResourceError error) {
             // Abaikan error minor (seperti favicon atau analytics gagal)

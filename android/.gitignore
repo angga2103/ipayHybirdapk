@@ -4,8 +4,7 @@
 GeneratedPluginRegistrant.java
 .cxx/
 
-# Remember to never publicly share your keystore.
-# See https://flutter.dev/to/reference-keystore
-key.properties
+# Release Keystore & signing properties for seamless updates
+!key.properties
+!app/upload-keystore.jks
 **/*.keystore
-**/*.jks

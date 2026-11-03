@@ -7,6 +7,7 @@ import '../../models/pos_product.dart';
 import '../../models/pos_transaction.dart';
 import '../../providers/pos_provider.dart';
 import '../../providers/printer_provider.dart';
+import '../../services/app_update_service.dart';
 import '../../services/pos_database_service.dart';
 import '../printer_settings_screen.dart';
 
@@ -124,6 +125,17 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
               ),
             ),
           ),
+          // Tombol Periksa Pembaruan Aplikasi
+          IconButton(
+            icon: const Icon(Icons.cloud_sync_outlined, size: 21, color: AppConfig.primaryTeal),
+            tooltip: 'Periksa Pembaruan Versi Baru',
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+            onPressed: () {
+              AppUpdateService().checkForUpdate(context, silent: false);
+            },
+          ),
+          const SizedBox(width: 4),
         ],
         bottom: TabBar(
           controller: _tabController,

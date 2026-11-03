@@ -58,11 +58,10 @@ android {
                 keystoreProperties["storeFile"] != null &&
                 file(keystoreProperties["storeFile"] as String).exists()
 
-            signingConfig = if (hasReleaseKey) {
-                signingConfigs.getByName("release")
-            } else {
-                signingConfigs.getByName("debug")
+            if (!hasReleaseKey) {
+                throw GradleException("FATAL: Release keystore file not found! Release APK must be signed with upload-keystore.jks to prevent app conflict.")
             }
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 
