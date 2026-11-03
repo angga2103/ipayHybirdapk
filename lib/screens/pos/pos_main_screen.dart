@@ -169,34 +169,60 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
               child: Column(
                 children: [
-                  // Search Box
-                  Container(
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF1F5F9),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: TextField(
-                      controller: _searchCtrl,
-                      onChanged: (val) => pos.search(val),
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                      decoration: InputDecoration(
-                        hintText: 'Cari nama barang atau kode produk...',
-                        hintStyle: TextStyle(fontSize: 13, color: Colors.grey.shade500),
-                        prefixIcon: const Icon(Icons.search, size: 20, color: Color(0xFF64748B)),
-                        suffixIcon: _searchCtrl.text.isNotEmpty
-                            ? IconButton(
-                                icon: const Icon(Icons.clear, size: 18),
-                                onPressed: () {
-                                  _searchCtrl.clear();
-                                  pos.search('');
-                                },
-                              )
-                            : null,
-                        border: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                  // Search Box with View Mode Switcher
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Container(
+                          height: 44,
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFF1F5F9),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: TextField(
+                            controller: _searchCtrl,
+                            onChanged: (val) => pos.search(val),
+                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                            decoration: InputDecoration(
+                              hintText: 'Cari nama barang atau kode produk...',
+                              hintStyle: TextStyle(fontSize: 13, color: Colors.grey.shade500),
+                              prefixIcon: const Icon(Icons.search, size: 20, color: Color(0xFF64748B)),
+                              suffixIcon: _searchCtrl.text.isNotEmpty
+                                  ? IconButton(
+                                      icon: const Icon(Icons.clear, size: 18),
+                                      onPressed: () {
+                                        _searchCtrl.clear();
+                                        pos.search('');
+                                      },
+                                    )
+                                  : null,
+                              border: InputBorder.none,
+                              contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                            ),
+                          ),
+                        ),
                       ),
-                    ),
+                      const SizedBox(width: 8),
+                      // Tombol Ganti Mode Grid / List
+                      Container(
+                        height: 44,
+                        width: 44,
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF1F5F9),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                        ),
+                        child: IconButton(
+                          icon: Icon(
+                            pos.isGridView ? Icons.view_list_rounded : Icons.grid_view_rounded,
+                            color: AppConfig.primaryTeal,
+                            size: 22,
+                          ),
+                          tooltip: pos.isGridView ? 'Ganti ke Tampilan List' : 'Ganti ke Tampilan Grid',
+                          onPressed: () => pos.toggleViewMode(),
+                        ),
+                      ),
+                    ],
                   ),
 
                   const SizedBox(height: 10),
@@ -216,7 +242,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
               ),
             ),
 
-            // 2. Product Grid
+            // 2. Product List / Grid
             Expanded(
               child: filtered.isEmpty
                   ? Center(
@@ -232,20 +258,29 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                         ],
                       ),
                     )
-                  : GridView.builder(
-                      padding: const EdgeInsets.fromLTRB(14, 12, 14, 100),
-                      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: 2,
-                        childAspectRatio: 0.88,
-                        crossAxisSpacing: 10,
-                        mainAxisSpacing: 10,
-                      ),
-                      itemCount: filtered.length,
-                      itemBuilder: (context, idx) {
-                        final product = filtered[idx];
-                        return _buildProductCard(pos, product);
-                      },
-                    ),
+                  : (pos.isGridView
+                      ? GridView.builder(
+                          padding: const EdgeInsets.fromLTRB(14, 12, 14, 100),
+                          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: 2,
+                            childAspectRatio: 0.88,
+                            crossAxisSpacing: 10,
+                            mainAxisSpacing: 10,
+                          ),
+                          itemCount: filtered.length,
+                          itemBuilder: (context, idx) {
+                            final product = filtered[idx];
+                            return _buildProductCard(pos, product);
+                          },
+                        )
+                      : ListView.builder(
+                          padding: const EdgeInsets.fromLTRB(14, 10, 14, 100),
+                          itemCount: filtered.length,
+                          itemBuilder: (context, idx) {
+                            final product = filtered[idx];
+                            return _buildProductListItem(pos, product);
+                          },
+                        )),
             ),
           ],
         ),
@@ -289,90 +324,352 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
   }
 
   Widget _buildProductCard(PosProvider pos, PosProduct product) {
+    final bool isOutOfStock = product.isStockManaged && product.stok <= 0;
+
     return InkWell(
-      onTap: () => pos.addToCart(product),
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0xFFE2E8F0)),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.02),
-              blurRadius: 4,
-              offset: const Offset(0, 2),
+      onTap: () {
+        if (isOutOfStock) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('⚠️ Stok "${product.nama}" sudah habis!'),
+              backgroundColor: Colors.red.shade800,
+              duration: const Duration(seconds: 2),
             ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(
-                      product.kode,
-                      style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)),
+          );
+          return;
+        }
+        final ok = pos.addToCart(product);
+        if (!ok && pos.errorMessage != null) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(pos.errorMessage!),
+              backgroundColor: Colors.orange.shade800,
+              duration: const Duration(seconds: 2),
+            ),
+          );
+        }
+      },
+      borderRadius: BorderRadius.circular(16),
+      child: Opacity(
+        opacity: isOutOfStock ? 0.65 : 1.0,
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: isOutOfStock ? Colors.red.shade200 : const Color(0xFFE2E8F0),
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.02),
+                blurRadius: 4,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        product.kode,
+                        style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)),
+                      ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (product.isConsignment) ...[
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: Colors.amber.shade50,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: Colors.amber.shade300),
+                              ),
+                              child: Text(
+                                'Titipan',
+                                style: TextStyle(fontSize: 8, fontWeight: FontWeight.w800, color: Colors.amber.shade900),
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                          ],
+                          if (isOutOfStock)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: Colors.red.shade50,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: Colors.red.shade300),
+                              ),
+                              child: Text(
+                                'HABIS',
+                                style: TextStyle(fontSize: 8, fontWeight: FontWeight.w900, color: Colors.red.shade800),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    product.nama,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: isOutOfStock ? const Color(0xFF64748B) : const Color(0xFF0F172A),
+                      height: 1.2,
+                      decoration: isOutOfStock ? TextDecoration.lineThrough : null,
                     ),
-                    if (product.isConsignment)
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                        decoration: BoxDecoration(
-                          color: Colors.amber.shade50,
-                          borderRadius: BorderRadius.circular(4),
-                          border: Border.all(color: Colors.amber.shade300),
-                        ),
-                        child: Text(
-                          'Titipan',
-                          style: TextStyle(fontSize: 8, fontWeight: FontWeight.w800, color: Colors.amber.shade900),
+                  ),
+                ],
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
+                    children: [
+                      Text(
+                        _currencyFormat.format(product.hargaJual),
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w900,
+                          color: isOutOfStock ? Colors.grey : AppConfig.primaryTeal,
                         ),
                       ),
-                  ],
+                      Text(
+                        '/${product.unit}',
+                        style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8)),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    product.isUnlimitedStock
+                        ? 'Stok: Bebas (∞)'
+                        : (isOutOfStock ? 'Stok: Habis' : 'Stok: ${product.stok} ${product.unit}'),
+                    style: TextStyle(
+                      fontSize: 9.5,
+                      fontWeight: FontWeight.w600,
+                      color: isOutOfStock
+                          ? Colors.red.shade700
+                          : (product.isUnlimitedStock ? Colors.blue.shade700 : const Color(0xFF64748B)),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Tampilan Produk Model List yang Rapi Sesuai Web iPay
+  Widget _buildProductListItem(PosProvider pos, PosProduct product) {
+    final bool isOutOfStock = product.isStockManaged && product.stok <= 0;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isOutOfStock ? Colors.red.shade100 : const Color(0xFFE2E8F0),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.015),
+            blurRadius: 4,
+            offset: const Offset(0, 1),
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(14),
+          onTap: () {
+            if (isOutOfStock) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('⚠️ Stok "${product.nama}" sudah habis!'),
+                  backgroundColor: Colors.red.shade800,
+                  duration: const Duration(seconds: 2),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  product.nama,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Color(0xFF0F172A), height: 1.2),
+              );
+              return;
+            }
+            final ok = pos.addToCart(product);
+            if (!ok && pos.errorMessage != null) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(pos.errorMessage!),
+                  backgroundColor: Colors.orange.shade800,
+                  duration: const Duration(seconds: 2),
                 ),
-              ],
-            ),
-            Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              );
+            }
+          },
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            child: Row(
               children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.baseline,
-                  textBaseline: TextBaseline.alphabetic,
+                // Inisial / Icon Box
+                Container(
+                  width: 42,
+                  height: 42,
+                  decoration: BoxDecoration(
+                    color: isOutOfStock
+                        ? Colors.grey.shade100
+                        : (product.isConsignment ? Colors.amber.shade50 : AppConfig.primaryTeal.withValues(alpha: 0.1)),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: isOutOfStock
+                          ? Colors.grey.shade300
+                          : (product.isConsignment ? Colors.amber.shade300 : AppConfig.primaryTeal.withValues(alpha: 0.2)),
+                    ),
+                  ),
+                  child: Center(
+                    child: Text(
+                      product.nama.isNotEmpty ? product.nama[0].toUpperCase() : 'P',
+                      style: TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w900,
+                        color: isOutOfStock
+                            ? Colors.grey
+                            : (product.isConsignment ? Colors.amber.shade900 : AppConfig.primaryTeal),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 12),
+
+                // Informasi Produk
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Text(
+                            product.kode,
+                            style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)),
+                          ),
+                          const SizedBox(width: 6),
+                          if (product.isConsignment)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: Colors.amber.shade50,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: Colors.amber.shade300),
+                              ),
+                              child: Text(
+                                'Titipan ${product.penitip ?? ""}'.trim(),
+                                style: TextStyle(fontSize: 8, fontWeight: FontWeight.w800, color: Colors.amber.shade900),
+                              ),
+                            ),
+                          if (isOutOfStock)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: Colors.red.shade50,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: Colors.red.shade300),
+                              ),
+                              child: Text(
+                                'HABIS',
+                                style: TextStyle(fontSize: 8, fontWeight: FontWeight.w900, color: Colors.red.shade800),
+                              ),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        product.nama,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w800,
+                          color: isOutOfStock ? const Color(0xFF64748B) : const Color(0xFF0F172A),
+                          decoration: isOutOfStock ? TextDecoration.lineThrough : null,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        product.isUnlimitedStock
+                            ? 'Stok: Bebas (∞)'
+                            : (isOutOfStock ? 'Stok: Habis' : 'Sisa: ${product.stok} ${product.unit}'),
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: isOutOfStock
+                              ? Colors.red.shade700
+                              : (product.isUnlimitedStock ? Colors.blue.shade700 : const Color(0xFF64748B)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(width: 8),
+
+                // Harga & Tombol Beli Cepat
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     Text(
                       _currencyFormat.format(product.hargaJual),
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: AppConfig.primaryTeal),
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w900,
+                        color: isOutOfStock ? Colors.grey : AppConfig.primaryTeal,
+                      ),
                     ),
-                    Text(
-                      '/${product.unit}',
-                      style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8)),
+                    const SizedBox(height: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: isOutOfStock ? Colors.grey.shade200 : AppConfig.primaryTeal,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            isOutOfStock ? Icons.block : Icons.add_shopping_cart,
+                            size: 13,
+                            color: isOutOfStock ? Colors.grey.shade600 : Colors.white,
+                          ),
+                          const SizedBox(width: 4),
+                          Text(
+                            isOutOfStock ? 'Habis' : 'Beli',
+                            style: TextStyle(
+                              fontSize: 10.5,
+                              fontWeight: FontWeight.bold,
+                              color: isOutOfStock ? Colors.grey.shade600 : Colors.white,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  product.isUnlimitedStock ? 'Stok: Bebas (∞)' : 'Stok: ${product.stok} ${product.unit}',
-                  style: TextStyle(
-                    fontSize: 9.5,
-                    fontWeight: FontWeight.w600,
-                    color: product.stok <= 0 && !product.isUnlimitedStock ? Colors.red.shade600 : const Color(0xFF64748B),
-                  ),
-                ),
               ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -653,42 +950,61 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
           ),
         ),
 
-        // Counter Qty
-        Container(
-          decoration: BoxDecoration(
-            color: const Color(0xFFF1F5F9),
-            borderRadius: BorderRadius.circular(8),
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                icon: const Icon(Icons.remove, size: 14),
-                padding: const EdgeInsets.all(4),
-                constraints: const BoxConstraints(),
-                onPressed: () {
-                  pos.updateCartQty(idx, -1);
-                  setModalState(() {});
-                },
+        // Counter Qty dengan proteksi batas stok
+        Builder(
+          builder: (ctx) {
+            final bool canAddMore = !item.isStockManaged || item.qty < item.product.stok;
+
+            return Container(
+              decoration: BoxDecoration(
+                color: const Color(0xFFF1F5F9),
+                borderRadius: BorderRadius.circular(8),
               ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                child: Text(
-                  '${item.qty}',
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
-                ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  IconButton(
+                    icon: const Icon(Icons.remove, size: 14),
+                    padding: const EdgeInsets.all(4),
+                    constraints: const BoxConstraints(),
+                    onPressed: () {
+                      pos.updateCartQty(idx, -1);
+                      setModalState(() {});
+                    },
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Text(
+                      '${item.qty}',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  IconButton(
+                    icon: Icon(
+                      Icons.add,
+                      size: 14,
+                      color: canAddMore ? const Color(0xFF0F172A) : Colors.grey.shade400,
+                    ),
+                    padding: const EdgeInsets.all(4),
+                    constraints: const BoxConstraints(),
+                    onPressed: () {
+                      if (canAddMore) {
+                        pos.updateCartQty(idx, 1);
+                        setModalState(() {});
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('⚠️ Maksimal stok "${item.product.nama}" tercapai (${item.product.stok} ${item.product.unit})'),
+                            duration: const Duration(seconds: 2),
+                          ),
+                        );
+                      }
+                    },
+                  ),
+                ],
               ),
-              IconButton(
-                icon: const Icon(Icons.add, size: 14),
-                padding: const EdgeInsets.all(4),
-                constraints: const BoxConstraints(),
-                onPressed: () {
-                  pos.updateCartQty(idx, 1);
-                  setModalState(() {});
-                },
-              ),
-            ],
-          ),
+            );
+          },
         ),
 
         const SizedBox(width: 12),
@@ -1848,105 +2164,806 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
 
   Widget _buildTransactionCard(PosProvider pos, PosTransaction trx) {
     final isCancelled = trx.isCancelled;
+    final isPartialReturn = trx.isPartiallyReturned;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
-      padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: isCancelled ? Colors.red.shade200 : const Color(0xFFE2E8F0)),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Text(
-                    trx.invoiceNo,
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      fontWeight: FontWeight.w900,
-                      color: isCancelled ? Colors.red.shade700 : const Color(0xFF0F172A),
-                      decoration: isCancelled ? TextDecoration.lineThrough : null,
-                    ),
-                  ),
-                  if (isCancelled) ...[
-                    const SizedBox(width: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                      decoration: BoxDecoration(
-                        color: Colors.red.shade50,
-                        borderRadius: BorderRadius.circular(4),
-                        border: Border.all(color: Colors.red.shade300),
-                      ),
-                      child: Text('BATAL', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.red.shade700)),
-                    ),
-                  ],
-                ],
-              ),
-              const SizedBox(height: 2),
-              Text(
-                '${trx.dateTime.hour.toString().padLeft(2, '0')}:${trx.dateTime.minute.toString().padLeft(2, '0')} • ${trx.items.length} Item • Laba: ${_currencyFormat.format(trx.profitAmount)}',
-                style: const TextStyle(fontSize: 10.5, color: Color(0xFF64748B)),
-              ),
-            ],
-          ),
-          Row(
-            children: [
-              Text(
-                _currencyFormat.format(trx.totalAmount),
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: isCancelled ? Colors.grey : AppConfig.primaryTeal),
-              ),
-              const SizedBox(width: 4),
-              IconButton(
-                icon: const Icon(Icons.print_outlined, size: 20, color: Color(0xFF475569)),
-                tooltip: 'Cetak Ulang Struk',
-                onPressed: () async {
-                  final ok = await pos.printReceipt(trx);
-                  if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(ok ? '✅ Struk ${trx.invoiceNo} dicetak ulang!' : '⚠️ Gagal mencetak.')),
-                    );
-                  }
-                },
-              ),
-              if (!isCancelled)
-                IconButton(
-                  icon: const Icon(Icons.cancel_outlined, size: 18, color: Colors.red),
-                  tooltip: 'Batalkan / Retur Transaksi',
-                  onPressed: () async {
-                    final confirm = await showDialog<bool>(
-                      context: context,
-                      builder: (d) => AlertDialog(
-                        title: const Text('Batalkan Transaksi?'),
-                        content: Text('Batalkan nota ${trx.invoiceNo}?\nStok produk yang dikelola akan otomatis dikembalikan ke etalase.'),
-                        actions: [
-                          TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Tutup')),
-                          TextButton(
-                            onPressed: () => Navigator.pop(d, true),
-                            child: const Text('Ya, Batalkan', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
-                          ),
-                        ],
-                      ),
-                    );
-                    if (confirm == true) {
-                      final ok = await pos.cancelTransaction(trx.invoiceNo, reason: 'Pembatalan Kasir');
-                      if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(content: Text(ok ? '✅ Transaksi ${trx.invoiceNo} berhasil dibatalkan.' : '⚠️ Gagal membatalkan transaksi.')),
-                        );
-                      }
-                    }
-                  },
-                ),
-            ],
+        border: Border.all(
+          color: isCancelled
+              ? Colors.red.shade200
+              : (isPartialReturn ? Colors.amber.shade300 : const Color(0xFFE2E8F0)),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.02),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
           ),
         ],
       ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(16),
+          onTap: () => _showTransactionDetailSheet(context, pos, trx),
+          child: Padding(
+            padding: const EdgeInsets.all(14),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Flexible(
+                            child: Text(
+                              trx.invoiceNo,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 12.5,
+                                fontWeight: FontWeight.w900,
+                                color: isCancelled ? Colors.red.shade700 : const Color(0xFF0F172A),
+                                decoration: isCancelled ? TextDecoration.lineThrough : null,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          if (isCancelled)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: Colors.red.shade50,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: Colors.red.shade300),
+                              ),
+                              child: Text('BATAL', style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: Colors.red.shade700)),
+                            )
+                          else if (isPartialReturn)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: Colors.amber.shade50,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: Colors.amber.shade400),
+                              ),
+                              child: Text('RETUR', style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: Colors.amber.shade900)),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        '${trx.dateTime.hour.toString().padLeft(2, '0')}:${trx.dateTime.minute.toString().padLeft(2, '0')} • ${trx.totalActiveItemsQty} Item Aktif • Laba: ${_currencyFormat.format(trx.profitAmount)}',
+                        style: const TextStyle(fontSize: 10.5, color: Color(0xFF64748B)),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      children: [
+                        Text(
+                          _currencyFormat.format(trx.totalAmount),
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w900,
+                            color: isCancelled ? Colors.grey : AppConfig.primaryTeal,
+                          ),
+                        ),
+                        Text(
+                          trx.paymentMethod,
+                          style: const TextStyle(fontSize: 9.5, color: Color(0xFF94A3B8), fontWeight: FontWeight.w600),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(width: 6),
+                    IconButton(
+                      icon: const Icon(Icons.print_outlined, size: 20, color: Color(0xFF475569)),
+                      tooltip: 'Cetak Ulang Struk',
+                      onPressed: () async {
+                        final ok = await pos.printReceipt(trx);
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text(ok ? '✅ Struk ${trx.invoiceNo} dicetak ulang!' : '⚠️ Gagal mencetak.')),
+                          );
+                        }
+                      },
+                    ),
+                    const Icon(Icons.chevron_right, size: 18, color: Color(0xFF94A3B8)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ==========================================
+  // DETAIL TRANSAKSI & DIALOG RETUR SEBAGIAN
+  // ==========================================
+
+  void _showTransactionDetailSheet(BuildContext context, PosProvider pos, PosTransaction trx) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (modalContext, setSheetState) {
+            // Ambil data transaksi terbaru dari state provider
+            final currentTrx = pos.transactions.firstWhere(
+              (t) => t.invoiceNo == trx.invoiceNo,
+              orElse: () => trx,
+            );
+
+            final isCancelled = currentTrx.isCancelled;
+            final isPartial = currentTrx.isPartiallyReturned;
+
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.88,
+              decoration: const BoxDecoration(
+                color: Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              child: Column(
+                children: [
+                  // Handle Bar
+                  Container(
+                    margin: const EdgeInsets.only(top: 10, bottom: 6),
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+
+                  // Header Nota
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Text(
+                                  currentTrx.invoiceNo,
+                                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: Color(0xFF0F172A)),
+                                ),
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: isCancelled
+                                        ? Colors.red.shade50
+                                        : (isPartial ? Colors.amber.shade50 : Colors.green.shade50),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                      color: isCancelled
+                                          ? Colors.red.shade300
+                                          : (isPartial ? Colors.amber.shade300 : Colors.green.shade300),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    isCancelled ? 'BATAL' : (isPartial ? 'RETUR SEBAGIAN' : 'SELESAI'),
+                                    style: TextStyle(
+                                      fontSize: 9.5,
+                                      fontWeight: FontWeight.bold,
+                                      color: isCancelled
+                                          ? Colors.red.shade800
+                                          : (isPartial ? Colors.amber.shade900 : Colors.green.shade800),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              '${currentTrx.dateTime.day}/${currentTrx.dateTime.month}/${currentTrx.dateTime.year} ${currentTrx.dateTime.hour.toString().padLeft(2, '0')}:${currentTrx.dateTime.minute.toString().padLeft(2, '0')} • Kasir: ${currentTrx.cashierName ?? "Kasir"}',
+                              style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                            ),
+                          ],
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, size: 22, color: Color(0xFF64748B)),
+                          onPressed: () => Navigator.pop(ctx),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const Divider(height: 1),
+
+                  // Konten Scrollable
+                  Expanded(
+                    child: ListView(
+                      padding: const EdgeInsets.all(16),
+                      children: [
+                        // 1. DAFTAR BARANG YANG DIBELI
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text(
+                              'Rincian Barang Belanjaan',
+                              style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w900, color: Color(0xFF0F172A)),
+                            ),
+                            Text(
+                              '${currentTrx.totalActiveItemsQty} Item Aktif',
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF64748B)),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+
+                        ...currentTrx.items.map((item) {
+                          final isItemModified = (item.normalPrice - item.soldPrice).abs() > 0.001;
+                          final bool canReturnItem = !isCancelled && item.activeQty > 0;
+
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 8),
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: item.isFullyReturned ? Colors.red.shade200 : const Color(0xFFE2E8F0),
+                              ),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            children: [
+                                              Flexible(
+                                                child: Text(
+                                                  item.productName,
+                                                  style: TextStyle(
+                                                    fontSize: 12.5,
+                                                    fontWeight: FontWeight.w800,
+                                                    color: item.isFullyReturned ? Colors.grey : const Color(0xFF0F172A),
+                                                    decoration: item.isFullyReturned ? TextDecoration.lineThrough : null,
+                                                  ),
+                                                ),
+                                              ),
+                                              if (item.isConsignment) ...[
+                                                const SizedBox(width: 4),
+                                                Container(
+                                                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                                  decoration: BoxDecoration(
+                                                    color: Colors.amber.shade50,
+                                                    borderRadius: BorderRadius.circular(4),
+                                                    border: Border.all(color: Colors.amber.shade300),
+                                                  ),
+                                                  child: Text(
+                                                    'Titipan: ${item.penitip ?? ""}',
+                                                    style: TextStyle(fontSize: 8, fontWeight: FontWeight.w800, color: Colors.amber.shade900),
+                                                  ),
+                                                ),
+                                              ],
+                                            ],
+                                          ),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            '${item.productKode} • Harga: ${_currencyFormat.format(item.soldPrice)}/${item.unit}${isItemModified ? " (Normal: ${_currencyFormat.format(item.normalPrice)})" : ""}',
+                                            style: const TextStyle(fontSize: 10.5, color: Color(0xFF64748B)),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    Column(
+                                      crossAxisAlignment: CrossAxisAlignment.end,
+                                      children: [
+                                        Text(
+                                          _currencyFormat.format(item.activeSubtotal),
+                                          style: TextStyle(
+                                            fontSize: 12.5,
+                                            fontWeight: FontWeight.w900,
+                                            color: item.isFullyReturned ? Colors.grey : const Color(0xFF0F172A),
+                                          ),
+                                        ),
+                                        Text(
+                                          'Qty: ${item.activeQty} ${item.unit}',
+                                          style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF64748B)),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+
+                                // Status Retur pada Item
+                                if (item.returnedQty > 0) ...[
+                                  const SizedBox(height: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: Colors.red.shade50,
+                                      borderRadius: BorderRadius.circular(6),
+                                      border: Border.all(color: Colors.red.shade200),
+                                    ),
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text(
+                                          '⚠️ Diretur: ${item.returnedQty} ${item.unit}',
+                                          style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Colors.red.shade900),
+                                        ),
+                                        Text(
+                                          'Pengembalian: ${_currencyFormat.format(item.returnedQty * item.soldPrice)}',
+                                          style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Colors.red.shade900),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ],
+
+                                // Tombol Aksi Retur Item Ini
+                                if (canReturnItem) ...[
+                                  const SizedBox(height: 8),
+                                  Align(
+                                    alignment: Alignment.centerRight,
+                                    child: OutlinedButton.icon(
+                                      onPressed: () {
+                                        _showReturnItemDialog(context, pos, currentTrx, item, onCompleted: () {
+                                          setSheetState(() {});
+                                        });
+                                      },
+                                      icon: const Icon(Icons.replay_rounded, size: 14, color: Colors.orange),
+                                      label: const Text('Retur Produk Ini', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Colors.orange)),
+                                      style: OutlinedButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                        side: const BorderSide(color: Colors.orange),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          );
+                        }),
+
+                        const SizedBox(height: 12),
+
+                        // 2. RINGKASAN FINANSIAL
+                        Container(
+                          padding: const EdgeInsets.all(14),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: const Color(0xFFE2E8F0)),
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Ringkasan Pembayaran', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900)),
+                              const SizedBox(height: 10),
+                              _buildDetailRow('Metode Pembayaran', currentTrx.paymentMethod),
+                              _buildDetailRow('Total Normal', _currencyFormat.format(currentTrx.normalAmount)),
+                              if (currentTrx.discountAmount > 0)
+                                _buildDetailRow('Potongan Diskon', '- ${_currencyFormat.format(currentTrx.discountAmount)}', color: Colors.green.shade700),
+                              const Divider(height: 16),
+                              _buildDetailRow(
+                                'TOTAL TAGIHAN AKHIR',
+                                _currencyFormat.format(currentTrx.totalAmount),
+                                isBold: true,
+                                color: AppConfig.primaryTeal,
+                              ),
+                              _buildDetailRow('Uang Diterima', _currencyFormat.format(currentTrx.cashPaid)),
+                              _buildDetailRow('Kembalian', _currencyFormat.format(currentTrx.changeDue)),
+                              const Divider(height: 16),
+                              _buildDetailRow('Keuntungan Bersih Toko', _currencyFormat.format(currentTrx.profitAmount), color: Colors.blue.shade800),
+                              if (currentTrx.consignmentDueAmount > 0)
+                                _buildDetailRow('Hak Bagi Hasil Penitip', _currencyFormat.format(currentTrx.consignmentDueAmount), color: Colors.amber.shade900),
+                              if (currentTrx.note != null && currentTrx.note!.isNotEmpty) ...[
+                                const SizedBox(height: 6),
+                                Text('Catatan: ${currentTrx.note!}', style: const TextStyle(fontSize: 10, color: Color(0xFF64748B), fontStyle: FontStyle.italic)),
+                              ],
+                            ],
+                          ),
+                        ),
+
+                        // 3. RIWAYAT RETUR / REFUND (JIKA ADA)
+                        if (currentTrx.returns.isNotEmpty) ...[
+                          const SizedBox(height: 14),
+                          Container(
+                            padding: const EdgeInsets.all(14),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.shade50,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: Colors.orange.shade300),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    const Icon(Icons.history_rounded, size: 16, color: Colors.deepOrange),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'Riwayat Retur & Pengembalian Dana (${currentTrx.returns.length})',
+                                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: Colors.deepOrange.shade900),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 8),
+                                ...currentTrx.returns.map((ret) {
+                                  return Container(
+                                    margin: const EdgeInsets.only(bottom: 6),
+                                    padding: const EdgeInsets.all(10),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(color: Colors.orange.shade200),
+                                    ),
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                '${ret.qtyReturned}x ${ret.productName}',
+                                                style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                                              ),
+                                              Text(
+                                                'Alasan: ${ret.reason ?? "-"} • ${ret.createdAt.hour.toString().padLeft(2, '0')}:${ret.createdAt.minute.toString().padLeft(2, '0')}',
+                                                style: const TextStyle(fontSize: 9.5, color: Color(0xFF64748B)),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                        Column(
+                                          crossAxisAlignment: CrossAxisAlignment.end,
+                                          children: [
+                                            Text(
+                                              '- ${_currencyFormat.format(ret.refundAmount)}',
+                                              style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w900, color: Colors.red),
+                                            ),
+                                            IconButton(
+                                              icon: const Icon(Icons.print_outlined, size: 16, color: Colors.deepOrange),
+                                              tooltip: 'Cetak Bukti Retur',
+                                              padding: EdgeInsets.zero,
+                                              constraints: const BoxConstraints(),
+                                              onPressed: () async {
+                                                final ok = await pos.printReturnReceipt(currentTrx, ret);
+                                                if (!mounted) return;
+                                                ScaffoldMessenger.of(this.context).showSnackBar(
+                                                  SnackBar(content: Text(ok ? '✅ Struk retur dicetak!' : '⚠️ Gagal mencetak struk retur.')),
+                                                );
+                                              },
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                }),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+
+                  // Bottom Action Buttons
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: const BoxDecoration(
+                      color: Colors.white,
+                      border: Border(top: BorderSide(color: Color(0xFFE2E8F0))),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () async {
+                              final ok = await pos.printReceipt(currentTrx);
+                              if (!mounted) return;
+                              ScaffoldMessenger.of(this.context).showSnackBar(
+                                SnackBar(content: Text(ok ? '✅ Struk transaksi dicetak ulang!' : '⚠️ Gagal mencetak struk.')),
+                              );
+                            },
+                            icon: const Icon(Icons.print, size: 18),
+                            label: const Text('Cetak Struk'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppConfig.primaryTeal,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                          ),
+                        ),
+                        if (!isCancelled && currentTrx.totalActiveItemsQty > 0) ...[
+                          const SizedBox(width: 10),
+                          OutlinedButton.icon(
+                            onPressed: () async {
+                              final confirm = await showDialog<bool>(
+                                context: this.context,
+                                builder: (d) => AlertDialog(
+                                  title: const Text('Batalkan Seluruh Nota?'),
+                                  content: Text('Batalkan transaksi ${currentTrx.invoiceNo}?\nSemua sisa stok barang akan dikembalikan ke etalase dan transaksi dinyatakan batal penuh.'),
+                                  actions: [
+                                    TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Batal')),
+                                    TextButton(
+                                      onPressed: () => Navigator.pop(d, true),
+                                      child: const Text('Ya, Batalkan Semua', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                                    ),
+                                  ],
+                                ),
+                              );
+
+                              if (confirm == true) {
+                                final ok = await pos.cancelTransaction(currentTrx.invoiceNo, reason: 'Pembatalan Kasir (Penuh)');
+                                if (!mounted) return;
+                                ScaffoldMessenger.of(this.context).showSnackBar(
+                                  SnackBar(content: Text(ok ? '✅ Transaksi ${currentTrx.invoiceNo} telah dibatalkan penuh.' : '⚠️ Gagal membatalkan.')),
+                                );
+                                setSheetState(() {});
+                              }
+                            },
+                            icon: const Icon(Icons.cancel_outlined, size: 18, color: Colors.red),
+                            label: const Text('Batal Semua', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                            style: OutlinedButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 12),
+                              side: const BorderSide(color: Colors.red),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildDetailRow(String label, String value, {bool isBold = false, Color? color}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: isBold ? FontWeight.bold : FontWeight.w500,
+              color: isBold ? const Color(0xFF0F172A) : const Color(0xFF64748B),
+            ),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 11.5,
+              fontWeight: isBold ? FontWeight.w900 : FontWeight.bold,
+              color: color ?? const Color(0xFF0F172A),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Dialog Retur Item Spesifik
+  void _showReturnItemDialog(
+    BuildContext context,
+    PosProvider pos,
+    PosTransaction trx,
+    PosTransactionItem item, {
+    VoidCallback? onCompleted,
+  }) {
+    int returnQty = 1;
+    final reasonCtrl = TextEditingController(text: 'Pelanggan berubah pikiran / barang rusak');
+    bool autoPrint = true;
+
+    showDialog(
+      context: context,
+      builder: (dCtx) {
+        return StatefulBuilder(
+          builder: (dialogCtx, setDialogState) {
+            final double refundTotal = returnQty * item.soldPrice;
+
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+              title: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.orange.shade50,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.replay_rounded, color: Colors.orange, size: 20),
+                  ),
+                  const SizedBox(width: 10),
+                  const Text('Retur Produk', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900)),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.productName,
+                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Harga Satuan: ${_currencyFormat.format(item.soldPrice)} • Tersedia untuk Diretur: ${item.activeQty} ${item.unit}',
+                    style: const TextStyle(fontSize: 10.5, color: Color(0xFF64748B)),
+                  ),
+                  const SizedBox(height: 14),
+
+                  // Counter Jumlah Unit yang Diretur
+                  const Text('Jumlah Unit yang Dikembalikan:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Container(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF1F5F9),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Row(
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.remove, size: 16),
+                              onPressed: returnQty > 1 ? () => setDialogState(() => returnQty--) : null,
+                            ),
+                            Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 14),
+                              child: Text(
+                                '$returnQty',
+                                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900),
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.add, size: 16),
+                              onPressed: returnQty < item.activeQty ? () => setDialogState(() => returnQty++) : null,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        'dari total ${item.activeQty} ${item.unit}',
+                        style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  // Alasan Retur
+                  const Text('Alasan Pengembalian:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  TextField(
+                    controller: reasonCtrl,
+                    style: const TextStyle(fontSize: 12),
+                    decoration: InputDecoration(
+                      hintText: 'Contoh: Kemasan cacat, salah varian...',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    ),
+                  ),
+
+                  const SizedBox(height: 14),
+
+                  // Total Refund Uang
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.red.shade50,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: Colors.red.shade200),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Total Uang Dikembalikan:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.red)),
+                        Text(
+                          _currencyFormat.format(refundTotal),
+                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: Colors.red),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 10),
+
+                  // Opsi Auto Print
+                  Row(
+                    children: [
+                      Checkbox(
+                        value: autoPrint,
+                        activeColor: AppConfig.primaryTeal,
+                        onChanged: (v) => setDialogState(() => autoPrint = v ?? true),
+                      ),
+                      const Expanded(
+                        child: Text(
+                          'Cetak struk bukti retur ke printer thermal',
+                          style: TextStyle(fontSize: 11, color: Color(0xFF475569)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dCtx),
+                  child: const Text('Batal', style: TextStyle(color: Color(0xFF64748B))),
+                ),
+                ElevatedButton(
+                  onPressed: () async {
+                    Navigator.pop(dCtx);
+
+                    final returnRecord = await pos.returnTransactionItem(
+                      invoiceNo: trx.invoiceNo,
+                      productKode: item.productKode,
+                      qtyToReturn: returnQty,
+                      reason: reasonCtrl.text.trim(),
+                      autoPrint: autoPrint,
+                    );
+
+                    if (!mounted) return;
+                    if (returnRecord != null) {
+                      ScaffoldMessenger.of(this.context).showSnackBar(
+                        SnackBar(
+                          content: Text('✅ Retur $returnQty unit ${item.productName} berhasil diproses.'),
+                          backgroundColor: Colors.green.shade800,
+                        ),
+                      );
+                      if (onCompleted != null) onCompleted();
+                    } else {
+                      ScaffoldMessenger.of(this.context).showSnackBar(
+                        SnackBar(
+                          content: Text('⚠️ ${pos.errorMessage ?? "Gagal memproses retur."}'),
+                          backgroundColor: Colors.red.shade800,
+                        ),
+                      );
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.orange.shade800,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  child: const Text('Proses Retur'),
+                ),
+              ],
+            );
+          },
+        );
+      },
     );
   }
 }

@@ -835,13 +835,19 @@ class PrinterService {
 
     final itemsFormatted = trx.items.map((it) {
       final isModified = (it.normalPrice - it.soldPrice).abs() > 0.001;
+      String? noteText;
+      if (it.returnedQty > 0) {
+        noteText = it.isFullyReturned ? 'DIRETUR PENUH (-${it.returnedQty})' : 'Retur Sebagian (-${it.returnedQty})';
+      } else if (isModified) {
+        noteText = it.isBelowCost ? 'Bawah Modal' : 'Diskon Khusus';
+      }
       return {
         'name': it.productName,
-        'qty': it.qty,
+        'qty': it.activeQty > 0 ? it.activeQty : it.qty,
         'unit': it.unit,
         'price': 'Rp ${it.soldPrice.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]}.')}',
-        'subtotal': 'Rp ${it.subtotal.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]}.')}',
-        'note': isModified ? (it.isBelowCost ? 'Bawah Modal' : 'Diskon Khusus') : null,
+        'subtotal': 'Rp ${(it.activeQty > 0 ? it.activeSubtotal : it.subtotal).toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]}.')}',
+        'note': noteText,
       };
     }).toList();
 
@@ -854,7 +860,13 @@ class PrinterService {
     final storeProfile = await getStoreProfile();
     final effectiveStoreName = storeName ?? storeProfile['name'] ?? 'IPAY';
     final effectiveAddress = address ?? storeProfile['tagline'] ?? 'Platform PPOB Terpercaya';
-    final effectiveFooter = storeProfile['footer'] ?? 'Terima kasih atas kunjungan Anda!\nBarang yang dibeli tidak dapat ditukar.';
+    String effectiveFooter = storeProfile['footer'] ?? 'Terima kasih atas kunjungan Anda!\nBarang yang dibeli tidak dapat ditukar.';
+
+    if (trx.isCancelled) {
+      effectiveFooter = '*** NOTA INI TELAH DIBATALKAN ***\n$effectiveFooter';
+    } else if (trx.isPartiallyReturned) {
+      effectiveFooter = '*** TERDAPAT BARANG DIRETUR ***\n$effectiveFooter';
+    }
 
     return await printReceipt(
       storeName: effectiveStoreName,
@@ -1058,6 +1070,127 @@ class PrinterService {
       return await PrintBluetoothThermal.writeBytes(bytes);
     } catch (e) {
       debugPrint('[PrinterService] Error printDailyClosingReport: $e');
+      return false;
+    }
+  }
+
+  /// Cetak Struk Bukti Retur / Pengembalian Barang POS
+  Future<bool> printReturnReceipt(
+    PosTransaction trx,
+    PosTransactionReturn returnRecord, {
+    String? storeName,
+  }) async {
+    try {
+      final isConnected = await checkConnectionStatus();
+      if (!isConnected) {
+        final savedMac = await getSavedMac();
+        if (savedMac != null && savedMac.isNotEmpty) {
+          final ok = await connect(savedMac);
+          if (!ok) return false;
+        } else {
+          return false;
+        }
+      }
+
+      final profile = await CapabilityProfile.load();
+      final generator = Generator(_paperSize, profile);
+      List<int> bytes = [];
+
+      bytes += generator.reset();
+
+      // Logo
+      final logoEnabled = await isLogoPrintEnabled();
+      if (logoEnabled) {
+        Uint8List? logoBytes = await getCachedStoreLogo();
+        if (logoBytes == null || logoBytes.isEmpty) {
+          try {
+            final byteData = await rootBundle.load('assets/icon/app_logo.png');
+            logoBytes = byteData.buffer.asUint8List();
+          } catch (_) {}
+        }
+        if (logoBytes != null && logoBytes.isNotEmpty) {
+          final logoRaster = processLogoRaster(logoBytes, generator);
+          if (logoRaster.isNotEmpty) bytes += logoRaster;
+        }
+      }
+
+      String formatRp(double val) {
+        return 'Rp ${val.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]}.')}';
+      }
+
+      final storeProf = await getStoreProfile();
+      final effectiveName = storeName ?? storeProf['name'] ?? 'IPAY';
+      final effectiveTagline = storeProf['tagline'] ?? 'Platform PPOB Terpercaya';
+
+      bytes += generator.text(
+        effectiveName.toUpperCase(),
+        styles: const PosStyles(align: PosAlign.center, bold: true, height: PosTextSize.size1, width: PosTextSize.size1),
+      );
+      if (effectiveTagline.isNotEmpty) {
+        bytes += generator.text(
+          effectiveTagline,
+          styles: const PosStyles(align: PosAlign.center),
+        );
+      }
+      bytes += generator.feed(1);
+
+      bytes += generator.text(
+        '*** BUKTI RETUR PENJUALAN ***',
+        styles: const PosStyles(align: PosAlign.center, bold: true),
+      );
+      bytes += generator.text(dividerLine, styles: const PosStyles(align: PosAlign.center));
+
+      final dateFormatted = '${returnRecord.createdAt.day.toString().padLeft(2, '0')}/${returnRecord.createdAt.month.toString().padLeft(2, '0')}/${returnRecord.createdAt.year} ${returnRecord.createdAt.hour.toString().padLeft(2, '0')}:${returnRecord.createdAt.minute.toString().padLeft(2, '0')}';
+
+      bytes += generator.text(formatTwoColumns('No. Faktur Asal', trx.invoiceNo));
+      bytes += generator.text(formatTwoColumns('Waktu Retur', dateFormatted));
+      bytes += generator.text(formatTwoColumns('Kasir', trx.cashierName ?? 'Kasir'));
+      if (returnRecord.reason != null && returnRecord.reason!.isNotEmpty) {
+        bytes += generator.text(formatTwoColumns('Alasan', returnRecord.reason!));
+      }
+      bytes += generator.text(dividerLine, styles: const PosStyles(align: PosAlign.center));
+
+      // Detail item yang diretur
+      bytes += generator.text(
+        returnRecord.productName,
+        styles: const PosStyles(bold: true),
+      );
+      final double unitPrice = returnRecord.qtyReturned > 0 ? (returnRecord.refundAmount / returnRecord.qtyReturned) : 0.0;
+      bytes += generator.text(
+        formatTwoColumns(
+          '${returnRecord.qtyReturned}x @ ${formatRp(unitPrice)}',
+          '- ${formatRp(returnRecord.refundAmount)}',
+        ),
+      );
+
+      bytes += generator.text(dividerLine, styles: const PosStyles(align: PosAlign.center));
+
+      bytes += generator.text(
+        formatTwoColumns('UANG REFUND (KEMBALI)', formatRp(returnRecord.refundAmount)),
+        styles: const PosStyles(bold: true),
+      );
+
+      bytes += generator.text(formatTwoColumns('Sisa Tagihan Nota', formatRp(trx.totalAmount)));
+      bytes += generator.text(formatTwoColumns('Status Nota', trx.status == 'CANCELLED' ? '[BATAL PENUH]' : '[RETUR SEBAGIAN]'));
+      bytes += generator.text(dividerLine, styles: const PosStyles(align: PosAlign.center));
+
+      bytes += generator.text(
+        'Barang retur telah diterima kembali ke stok toko.',
+        styles: const PosStyles(align: PosAlign.center),
+      );
+      bytes += generator.text(
+        'Terima kasih.',
+        styles: const PosStyles(align: PosAlign.center),
+      );
+
+      bytes += generator.feed(1);
+      if (_paperSize == PaperSize.mm80) {
+        bytes += generator.cut();
+      }
+
+      return await PrintBluetoothThermal.writeBytes(bytes);
+    } catch (e) {
+      debugPrint('[PrinterService] Error printReturnReceipt: $e');
       return false;
     }
   }

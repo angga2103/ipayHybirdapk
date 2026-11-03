@@ -28,6 +28,7 @@ class PosProvider extends ChangeNotifier {
   String? _errorMessage;
   String _cashierName = 'Kasir';
   String _storeName = 'IPAY';
+  bool _isGridView = false; // Default List view (bisa diubah ke Grid)
 
   List<PosProduct> get products => _products;
   List<String> get categories => _categories;
@@ -41,6 +42,17 @@ class PosProvider extends ChangeNotifier {
   String? get errorMessage => _errorMessage;
   String get cashierName => _cashierName;
   String get storeName => _storeName;
+  bool get isGridView => _isGridView;
+
+  void toggleViewMode() {
+    _isGridView = !_isGridView;
+    notifyListeners();
+  }
+
+  void setGridView(bool val) {
+    _isGridView = val;
+    notifyListeners();
+  }
 
   void setCashierName(String name) {
     _cashierName = name;
@@ -79,7 +91,6 @@ class PosProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // Sinkronisasi profil toko & logo otomatis dari backend admin web secara background
       PrinterService.instance.syncStoreSettingsFromBackend().then((_) async {
         final profile = await PrinterService.instance.getStoreProfile();
         if (profile['name'] != null && profile['name'].toString().isNotEmpty) {
@@ -116,24 +127,49 @@ class PosProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  // --- Cart Operations ---
-  void addToCart(PosProduct product) {
+  // --- Cart Operations dengan Proteksi Stok Ketat ---
+  bool addToCart(PosProduct product) {
+    if (product.isStockManaged && product.stok <= 0) {
+      _errorMessage = 'Stok "${product.nama}" sudah habis!';
+      notifyListeners();
+      return false;
+    }
+
     final idx = _cart.indexWhere((it) => it.product.kode == product.kode);
     if (idx >= 0) {
+      if (product.isStockManaged && (_cart[idx].qty + 1) > product.stok) {
+        _errorMessage = 'Sisa stok "${product.nama}" hanya ${product.stok} ${product.unit}.';
+        notifyListeners();
+        return false;
+      }
       _cart[idx].qty += 1;
     } else {
       _cart.add(PosCartItem(product: product, qty: 1));
     }
+    _errorMessage = null;
     notifyListeners();
+    return true;
   }
 
-  void updateCartQty(int index, int delta) {
-    if (index < 0 || index >= _cart.length) return;
-    _cart[index].qty += delta;
-    if (_cart[index].qty <= 0) {
+  bool updateCartQty(int index, int delta) {
+    if (index < 0 || index >= _cart.length) return false;
+    final item = _cart[index];
+
+    if (delta > 0 && item.isStockManaged) {
+      if (item.qty + delta > item.product.stok) {
+        _errorMessage = 'Maksimal stok "${item.product.nama}" tercapai (${item.product.stok} ${item.product.unit}).';
+        notifyListeners();
+        return false;
+      }
+    }
+
+    item.qty += delta;
+    if (item.qty <= 0) {
       _cart.removeAt(index);
     }
+    _errorMessage = null;
     notifyListeners();
+    return true;
   }
 
   void updateCartItemPrice(int index, double newPrice) {
@@ -251,7 +287,55 @@ class PosProvider extends ChangeNotifier {
     }
   }
 
-  // --- Retur / Pembatalan Transaksi ---
+  // --- Retur / Pembatalan Transaksi Parsial & Penuh ---
+  Future<PosTransactionReturn?> returnTransactionItem({
+    required String invoiceNo,
+    required String productKode,
+    required int qtyToReturn,
+    String? reason,
+    bool autoPrint = true,
+  }) async {
+    try {
+      final returnRecord = await PosDatabaseService.instance.returnTransactionItem(
+        invoiceNo: invoiceNo,
+        productKode: productKode,
+        qtyToReturn: qtyToReturn,
+        reason: reason,
+      );
+      await refreshAll();
+
+      if (autoPrint) {
+        final updatedTrx = await PosDatabaseService.instance.getTransactionByInvoice(invoiceNo);
+        if (updatedTrx != null) {
+          await PrinterService.instance.printReturnReceipt(
+            updatedTrx,
+            returnRecord,
+            storeName: _storeName,
+          );
+        }
+      }
+
+      return returnRecord;
+    } catch (e) {
+      _errorMessage = 'Gagal retur barang: $e';
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<bool> printReturnReceipt(PosTransaction trx, PosTransactionReturn returnRecord) async {
+    try {
+      return await PrinterService.instance.printReturnReceipt(
+        trx,
+        returnRecord,
+        storeName: _storeName,
+      );
+    } catch (e) {
+      debugPrint('[PosProvider] Error printReturnReceipt: $e');
+      return false;
+    }
+  }
+
   Future<bool> cancelTransaction(String invoiceNo, {String? reason}) async {
     try {
       final ok = await PosDatabaseService.instance.cancelTransaction(invoiceNo, reason: reason);
@@ -307,7 +391,27 @@ class PosProvider extends ChangeNotifier {
     }
   }
 
-  // --- Excel Sync ---
+  // --- Konsinyasi Settlement ---
+  Future<void> settleConsignment({required ConsignmentSummary summary, bool andPrint = true}) async {
+    try {
+      await PosDatabaseService.instance.settleConsignment(
+        penitip: summary.penitip,
+        totalQty: summary.totalSoldQty,
+        totalDue: summary.remainingDue,
+        storeFee: summary.storeFee,
+        note: 'Pelunasan konsinyasi otomatis',
+      );
+      if (andPrint) {
+        await printConsignmentReport(summary);
+      }
+      await refreshAll();
+    } catch (e) {
+      _errorMessage = 'Gagal mencatat pelunasan konsinyasi: $e';
+      notifyListeners();
+    }
+  }
+
+  // --- Excel Import & Export ---
   Future<int> importFromExcel() async {
     try {
       final count = await PosExcelService.instance.pickAndImportExcel();
@@ -316,41 +420,28 @@ class PosProvider extends ChangeNotifier {
       }
       return count;
     } catch (e) {
-      _errorMessage = 'Gagal import Excel: $e';
+      _errorMessage = 'Gagal mengimpor file: $e';
       notifyListeners();
       return 0;
     }
   }
 
   Future<bool> exportTemplate() async {
-    return await PosExcelService.instance.shareTemplateExcel();
+    try {
+      return await PosExcelService.instance.shareTemplateExcel();
+    } catch (e) {
+      _errorMessage = 'Gagal mengunduh template: $e';
+      notifyListeners();
+      return false;
+    }
   }
 
   Future<bool> exportCatalog() async {
-    return await PosExcelService.instance.shareProductCatalog(_products);
-  }
-
-  // --- Consignment Settlement ---
-  Future<bool> settleConsignment({
-    required ConsignmentSummary summary,
-    bool andPrint = true,
-  }) async {
     try {
-      await PosDatabaseService.instance.settleConsignment(
-        penitip: summary.penitip,
-        totalQty: summary.totalSoldQty,
-        totalDue: summary.totalDueToPenitip,
-        storeFee: summary.storeFee,
-      );
-
-      if (andPrint) {
-        await printConsignmentReport(summary);
-      }
-
-      await refreshAll();
-      return true;
+      final allProducts = await PosDatabaseService.instance.getAllProducts(includeArchived: false);
+      return await PosExcelService.instance.shareProductCatalog(allProducts);
     } catch (e) {
-      _errorMessage = 'Gagal memproses setoran konsinyasi: $e';
+      _errorMessage = 'Gagal mengekspor katalog: $e';
       notifyListeners();
       return false;
     }

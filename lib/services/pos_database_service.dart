@@ -60,7 +60,7 @@ class PosDatabaseService {
 
     return await openDatabase(
       path,
-      version: 2,
+      version: 3,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -127,6 +127,7 @@ class PosDatabaseService {
             normal_price REAL NOT NULL,
             sold_price REAL NOT NULL,
             qty INTEGER NOT NULL,
+            returned_qty INTEGER NOT NULL DEFAULT 0,
             subtotal REAL NOT NULL,
             profit REAL NOT NULL,
             penitip TEXT,
@@ -138,7 +139,25 @@ class PosDatabaseService {
         await db.execute('CREATE INDEX idx_items_trx ON pos_transaction_items(transaction_id);');
         await db.execute('CREATE INDEX idx_items_penitip ON pos_transaction_items(penitip);');
 
-        // 4. Tabel Pelunasan / Setoran Konsinyasi
+        // 4. Tabel Riwayat Retur / Pengembalian Item
+        await db.execute('''
+          CREATE TABLE pos_transaction_returns (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            transaction_id INTEGER NOT NULL,
+            invoice_no TEXT NOT NULL,
+            product_kode TEXT NOT NULL,
+            product_name TEXT NOT NULL,
+            qty_returned INTEGER NOT NULL,
+            refund_amount REAL NOT NULL,
+            reason TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (transaction_id) REFERENCES pos_transactions (id) ON DELETE CASCADE
+          );
+        ''');
+        await db.execute('CREATE INDEX idx_returns_trx ON pos_transaction_returns(transaction_id);');
+        await db.execute('CREATE INDEX idx_returns_invoice ON pos_transaction_returns(invoice_no);');
+
+        // 5. Tabel Pelunasan / Setoran Konsinyasi
         await db.execute('''
           CREATE TABLE pos_consignment_settlements (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -151,7 +170,7 @@ class PosDatabaseService {
           );
         ''');
 
-        // 5. Tabel Rekap Penutupan Kas Harian (Laporan Z)
+        // 6. Tabel Rekap Penutupan Kas Harian (Laporan Z)
         await db.execute('''
           CREATE TABLE pos_daily_closings (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -173,7 +192,6 @@ class PosDatabaseService {
       },
       onUpgrade: (db, oldVersion, newVersion) async {
         if (oldVersion < 2) {
-          // Migrasi Skema v1 -> v2
           try {
             await db.execute('ALTER TABLE pos_products ADD COLUMN is_stock_managed INTEGER NOT NULL DEFAULT 1;');
           } catch (_) {}
@@ -213,6 +231,31 @@ class PosDatabaseService {
                 notes TEXT
               );
             ''');
+          } catch (_) {}
+        }
+
+        if (oldVersion < 3) {
+          // Migrasi Skema v2 -> v3 (Dukungan Retur Parsial & Riwayat Retur)
+          try {
+            await db.execute('ALTER TABLE pos_transaction_items ADD COLUMN returned_qty INTEGER NOT NULL DEFAULT 0;');
+          } catch (_) {}
+          try {
+            await db.execute('''
+              CREATE TABLE IF NOT EXISTS pos_transaction_returns (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                transaction_id INTEGER NOT NULL,
+                invoice_no TEXT NOT NULL,
+                product_kode TEXT NOT NULL,
+                product_name TEXT NOT NULL,
+                qty_returned INTEGER NOT NULL,
+                refund_amount REAL NOT NULL,
+                reason TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (transaction_id) REFERENCES pos_transactions (id) ON DELETE CASCADE
+              );
+            ''');
+            await db.execute('CREATE INDEX IF NOT EXISTS idx_returns_trx ON pos_transaction_returns(transaction_id);');
+            await db.execute('CREATE INDEX IF NOT EXISTS idx_returns_invoice ON pos_transaction_returns(invoice_no);');
           } catch (_) {}
         }
       },
@@ -429,7 +472,6 @@ class PosDatabaseService {
   /// Menghapus produk secara aman (Soft delete jika sudah ada transaksi, hard delete jika belum)
   Future<bool> deleteOrArchiveProduct(String kode) async {
     final db = await database;
-    // Cek apakah produk sudah ada riwayat transaksi
     final check = await db.rawQuery(
       'SELECT COUNT(id) as cnt FROM pos_transaction_items WHERE product_kode = ?',
       [kode],
@@ -437,7 +479,6 @@ class PosDatabaseService {
     final count = (check.first['cnt'] as num).toInt();
 
     if (count > 0) {
-      // Ada transaksi: Soft delete (Arsipkan)
       await db.update(
         'pos_products',
         {'is_archived': 1, 'updated_at': DateTime.now().toIso8601String()},
@@ -446,7 +487,6 @@ class PosDatabaseService {
       );
       return false; // Diarsipkan (bukan dihapus permanen)
     } else {
-      // Belum ada transaksi: Hapus permanen
       await db.delete('pos_products', where: 'kode = ?', whereArgs: [kode]);
       return true; // Dihapus permanen
     }
@@ -463,7 +503,7 @@ class PosDatabaseService {
   }
 
   // ==========================================
-  // TRANSAKSI KASIR (CHECKOUT ATOMIK)
+  // TRANSAKSI KASIR (CHECKOUT ATOMIK DENGAN VALIDASI STOK KETAT)
   // ==========================================
 
   Future<PosTransaction> checkoutTransaction({
@@ -510,11 +550,32 @@ class PosDatabaseService {
       status: 'COMPLETED',
     );
 
-    await db.transaction((txn) async {
-      // 1. Simpan Header Transaksi
-      final trxId = await txn.insert('pos_transactions', trx.toMap());
+    int trxId = 0;
 
-      // 2. Simpan Setiap Item Transaksi
+    await db.transaction((txn) async {
+      // 1. Verifikasi Ketersediaan Stok Terlebih Dahulu (Strict Stock Validation)
+      for (final item in cartItems) {
+        if (item.isStockManaged) {
+          final pQuery = await txn.rawQuery(
+            'SELECT nama, stok FROM pos_products WHERE kode = ? AND is_stock_managed = 1',
+            [item.product.kode],
+          );
+          if (pQuery.isNotEmpty) {
+            final curStock = (pQuery.first['stok'] as num).toInt();
+            if (curStock < item.qty) {
+              final prodName = pQuery.first['nama'] ?? item.product.nama;
+              throw Exception('Stok "$prodName" tidak mencukupi (Tersedia: $curStock, Diminta: ${item.qty}). Transaksi dibatalkan.');
+            }
+          } else {
+            throw Exception('Produk "${item.product.nama}" (${item.product.kode}) tidak ditemukan di etalase.');
+          }
+        }
+      }
+
+      // 2. Simpan Header Transaksi
+      trxId = await txn.insert('pos_transactions', trx.toMap());
+
+      // 3. Simpan Setiap Item Transaksi dan Potong Stok
       for (final item in cartItems) {
         final trxItem = PosTransactionItem(
           transactionId: trxId,
@@ -525,6 +586,7 @@ class PosDatabaseService {
           normalPrice: item.normalPrice,
           soldPrice: item.actualPrice,
           qty: item.qty,
+          returnedQty: 0,
           subtotal: item.subtotal,
           profit: item.profitAmount,
           penitip: item.penitip,
@@ -533,7 +595,7 @@ class PosDatabaseService {
         );
         await txn.insert('pos_transaction_items', trxItem.toMap(trxId));
 
-        // 3. Potong Stok Produk HANYA jika kelola stok aktif (isStockManaged == true)
+        // Potong Stok Produk HANYA jika kelola stok aktif
         if (item.isStockManaged) {
           await txn.rawUpdate('''
             UPDATE pos_products 
@@ -546,6 +608,7 @@ class PosDatabaseService {
     });
 
     final savedItems = cartItems.map((c) => PosTransactionItem(
+      transactionId: trxId,
       productKode: c.product.kode,
       productName: c.product.nama,
       unit: c.product.unit,
@@ -553,6 +616,7 @@ class PosDatabaseService {
       normalPrice: c.normalPrice,
       soldPrice: c.actualPrice,
       qty: c.qty,
+      returnedQty: 0,
       subtotal: c.subtotal,
       profit: c.profitAmount,
       penitip: c.penitip,
@@ -561,6 +625,7 @@ class PosDatabaseService {
     )).toList();
 
     return PosTransaction(
+      id: trxId,
       invoiceNo: trx.invoiceNo,
       dateTime: trx.dateTime,
       totalAmount: trx.totalAmount,
@@ -575,43 +640,191 @@ class PosDatabaseService {
       note: trx.note,
       status: 'COMPLETED',
       items: savedItems,
+      returns: [],
     );
   }
 
-  /// Membatalkan transaksi (Retur Penuh) dan mengembalikan stok yang dikelola
+  // ==========================================
+  // RETUR BARANG (PARSIAL / PER ITEM)
+  // ==========================================
+
+  /// Melakukan retur untuk sebagian atau seluruh unit dari 1 item produk tertentu
+  Future<PosTransactionReturn> returnTransactionItem({
+    required String invoiceNo,
+    required String productKode,
+    required int qtyToReturn,
+    String? reason,
+  }) async {
+    if (qtyToReturn <= 0) {
+      throw Exception('Jumlah unit yang diretur harus lebih dari 0.');
+    }
+
+    final db = await database;
+
+    // 1. Ambil transaksi
+    final trxs = await db.query('pos_transactions', where: 'invoice_no = ?', whereArgs: [invoiceNo]);
+    if (trxs.isEmpty) {
+      throw Exception('Faktur $invoiceNo tidak ditemukan.');
+    }
+    final trxData = trxs.first;
+    final trxId = (trxData['id'] as num).toInt();
+
+    // 2. Ambil item bersangkutan
+    final items = await db.query(
+      'pos_transaction_items',
+      where: 'transaction_id = ? AND product_kode = ?',
+      whereArgs: [trxId, productKode],
+    );
+    if (items.isEmpty) {
+      throw Exception('Produk $productKode tidak terdapat pada transaksi $invoiceNo.');
+    }
+
+    final item = PosTransactionItem.fromMap(items.first);
+    if (qtyToReturn > item.activeQty) {
+      throw Exception('Jumlah retur ($qtyToReturn) melebihi sisa barang aktif (${item.activeQty}).');
+    }
+
+    final now = DateTime.now();
+    final refundAmount = qtyToReturn * item.soldPrice;
+    final profitRefund = qtyToReturn * item.unitProfit;
+    final consignmentDueRefund = qtyToReturn * item.unitDueToPenitip;
+
+    final returnRecord = PosTransactionReturn(
+      transactionId: trxId,
+      invoiceNo: invoiceNo,
+      productKode: item.productKode,
+      productName: item.productName,
+      qtyReturned: qtyToReturn,
+      refundAmount: refundAmount,
+      reason: reason ?? 'Retur Kasir',
+      createdAt: now,
+    );
+
+    await db.transaction((txn) async {
+      // A. Catat riwayat retur
+      await txn.insert('pos_transaction_returns', returnRecord.toMap(trxId));
+
+      // B. Update returned_qty pada pos_transaction_items
+      await txn.rawUpdate('''
+        UPDATE pos_transaction_items 
+        SET returned_qty = returned_qty + ?
+        WHERE id = ?
+      ''', [qtyToReturn, item.id]);
+
+      // C. Kembalikan stok fisik jika produk dikelola stoknya
+      if (item.isStockManaged) {
+        await txn.rawUpdate('''
+          UPDATE pos_products 
+          SET stok = stok + ?,
+              updated_at = ?
+          WHERE kode = ? AND is_stock_managed = 1 AND stok >= 0
+        ''', [qtyToReturn, now.toIso8601String(), item.productKode]);
+      }
+
+      // D. Cek apakah setelah retur ini, seluruh item transaksi habis (semua unit aktif = 0)
+      final allItemsQuery = await txn.query('pos_transaction_items', where: 'transaction_id = ?', whereArgs: [trxId]);
+      int totalRemainingActiveQty = 0;
+      for (final m in allItemsQuery) {
+        final q = (m['qty'] as num).toInt();
+        final r = (m['returned_qty'] as num).toInt();
+        totalRemainingActiveQty += (q - r > 0 ? q - r : 0);
+      }
+
+      final newStatus = totalRemainingActiveQty <= 0 ? 'CANCELLED' : 'PARTIAL_RETURN';
+      final existingNote = trxData['note']?.toString() ?? '';
+      final returnNoteTag = '[Retur ${qtyToReturn}x ${item.productName}: ${_formatRupiah(refundAmount)}]';
+      final updatedNote = existingNote.contains(returnNoteTag)
+          ? existingNote
+          : (existingNote.isEmpty ? returnNoteTag : '$existingNote | $returnNoteTag');
+
+      // E. Update total di header transaksi
+      await txn.rawUpdate('''
+        UPDATE pos_transactions 
+        SET total_amount = MAX(0, total_amount - ?),
+            profit_amount = profit_amount - ?,
+            consignment_due_amount = MAX(0, consignment_due_amount - ?),
+            status = ?,
+            note = ?
+        WHERE id = ?
+      ''', [refundAmount, profitRefund, consignmentDueRefund, newStatus, updatedNote, trxId]);
+    });
+
+    return returnRecord;
+  }
+
+  static String _formatRupiah(double val) {
+    return 'Rp ${val.toInt()}';
+  }
+
+  // ==========================================
+  // PEMBATALAN PENUH TRANSAKSI (CANCEL ALL)
+  // ==========================================
+
+  /// Membatalkan seluruh sisa item yang belum diretur pada transaksi
   Future<bool> cancelTransaction(String invoiceNo, {String? reason}) async {
     final db = await database;
     final trxs = await db.query('pos_transactions', where: 'invoice_no = ?', whereArgs: [invoiceNo]);
     if (trxs.isEmpty) return false;
 
-    final trxId = trxs.first['id'] as int;
-    final items = await db.query('pos_transaction_items', where: 'transaction_id = ?', whereArgs: [trxId]);
+    final trxData = trxs.first;
+    final trxId = trxData['id'] as int;
+    final itemMaps = await db.query('pos_transaction_items', where: 'transaction_id = ?', whereArgs: [trxId]);
+    final now = DateTime.now();
 
     await db.transaction((txn) async {
-      // 1. Kembalikan stok untuk produk yang dikelola
-      for (final it in items) {
-        final kode = it['product_kode']?.toString() ?? '';
-        final qty = (it['qty'] as num).toInt();
-        final isStockManaged = (it['is_stock_managed'] == 1 || it['is_stock_managed'] == true);
+      double totalRefund = 0.0;
 
-        if (isStockManaged && kode.isNotEmpty) {
-          await txn.rawUpdate('''
-            UPDATE pos_products 
-            SET stok = stok + ?,
-                updated_at = ?
-            WHERE kode = ? AND is_stock_managed = 1 AND stok >= 0
-          ''', [qty, DateTime.now().toIso8601String(), kode]);
+      for (final im in itemMaps) {
+        final item = PosTransactionItem.fromMap(im);
+        final remainingActive = item.activeQty;
+
+        if (remainingActive > 0) {
+          final itemRefund = remainingActive * item.soldPrice;
+          totalRefund += itemRefund;
+
+          // Catat ke pos_transaction_returns
+          await txn.insert('pos_transaction_returns', {
+            'transaction_id': trxId,
+            'invoice_no': invoiceNo,
+            'product_kode': item.productKode,
+            'product_name': item.productName,
+            'qty_returned': remainingActive,
+            'refund_amount': itemRefund,
+            'reason': reason ?? 'Pembatalan Penuh Nota',
+            'created_at': now.toIso8601String(),
+          });
+
+          // Set returned_qty = qty (semua diretur)
+          await txn.update(
+            'pos_transaction_items',
+            {'returned_qty': item.qty},
+            where: 'id = ?',
+            whereArgs: [item.id],
+          );
+
+          // Kembalikan stok fisik jika dikelola
+          if (item.isStockManaged) {
+            await txn.rawUpdate('''
+              UPDATE pos_products 
+              SET stok = stok + ?,
+                  updated_at = ?
+              WHERE kode = ? AND is_stock_managed = 1 AND stok >= 0
+            ''', [remainingActive, now.toIso8601String(), item.productKode]);
+          }
         }
       }
 
-      // 2. Tandai transaksi sebagai BATAL (CANCELLED)
-      final existingNote = trxs.first['note']?.toString() ?? '';
-      final updatedNote = '$existingNote [DIBATALKAN: ${reason ?? "Pembatalan Kasir"}]'.trim();
+      // Tandai transaksi sebagai CANCELLED
+      final existingNote = trxData['note']?.toString() ?? '';
+      final updatedNote = '$existingNote [DIBATALKAN PENUH: ${reason ?? "Pembatalan Kasir"} (Total Refund: ${_formatRupiah(totalRefund)})]'.trim();
 
       await txn.update(
         'pos_transactions',
         {
           'status': 'CANCELLED',
+          'total_amount': 0.0,
+          'profit_amount': 0.0,
+          'consignment_due_amount': 0.0,
           'note': updatedNote,
         },
         where: 'id = ?',
@@ -621,6 +834,10 @@ class PosDatabaseService {
 
     return true;
   }
+
+  // ==========================================
+  // QUERY RIWAYAT LENGKAP TRANSAKSI
+  // ==========================================
 
   Future<List<PosTransaction>> getAllTransactions({int limit = 50}) async {
     final db = await database;
@@ -633,15 +850,47 @@ class PosDatabaseService {
     List<PosTransaction> trxs = [];
     for (final m in maps) {
       final trxId = m['id'] as int;
+
+      // Ambil items
       final itemMaps = await db.query(
         'pos_transaction_items',
         where: 'transaction_id = ?',
         whereArgs: [trxId],
       );
       final items = itemMaps.map((it) => PosTransactionItem.fromMap(it)).toList();
-      trxs.add(PosTransaction.fromMap(m, items));
+
+      // Ambil riwayat returns
+      final returnMaps = await db.query(
+        'pos_transaction_returns',
+        where: 'transaction_id = ?',
+        whereArgs: [trxId],
+        orderBy: 'created_at ASC',
+      );
+      final returns = returnMaps.map((r) => PosTransactionReturn.fromMap(r)).toList();
+
+      trxs.add(PosTransaction.fromMap(m, items, returns));
     }
     return trxs;
+  }
+
+  Future<PosTransaction?> getTransactionByInvoice(String invoiceNo) async {
+    final db = await database;
+    final maps = await db.query('pos_transactions', where: 'invoice_no = ?', whereArgs: [invoiceNo]);
+    if (maps.isEmpty) return null;
+
+    final trxId = maps.first['id'] as int;
+    final itemMaps = await db.query('pos_transaction_items', where: 'transaction_id = ?', whereArgs: [trxId]);
+    final items = itemMaps.map((it) => PosTransactionItem.fromMap(it)).toList();
+
+    final returnMaps = await db.query(
+      'pos_transaction_returns',
+      where: 'transaction_id = ?',
+      whereArgs: [trxId],
+      orderBy: 'created_at ASC',
+    );
+    final returns = returnMaps.map((r) => PosTransactionReturn.fromMap(r)).toList();
+
+    return PosTransaction.fromMap(maps.first, items, returns);
   }
 
   // ==========================================
@@ -704,16 +953,16 @@ class PosDatabaseService {
       final variantCount = (prodResult.first['variant_count'] as num).toInt();
       final totalStock = (prodResult.first['total_stock'] as num).toInt();
 
-      // 2. Data penjualan terakumulasi (dari transaksi aktif yang tidak dibatalkan)
+      // 2. Data penjualan terakumulasi (hanya unit aktif yang TIDAK diretur dan dari transaksi yang tidak dibatalkan)
       final salesResult = await db.rawQuery('''
         SELECT 
-          COALESCE(SUM(i.qty), 0) as total_sold,
-          COALESCE(SUM(i.subtotal), 0) as total_gross,
-          COALESCE(SUM(CASE WHEN i.due_to_penitip > 0 THEN i.due_to_penitip ELSE (i.cost_price * i.qty) END), 0) as total_due,
-          COALESCE(SUM(i.profit), 0) as store_fee
+          COALESCE(SUM(i.qty - COALESCE(i.returned_qty, 0)), 0) as total_sold,
+          COALESCE(SUM((i.qty - COALESCE(i.returned_qty, 0)) * i.sold_price), 0) as total_gross,
+          COALESCE(SUM((i.qty - COALESCE(i.returned_qty, 0)) * (CASE WHEN i.due_to_penitip > 0 THEN (i.due_to_penitip / i.qty) ELSE i.cost_price END)), 0) as total_due,
+          COALESCE(SUM((i.qty - COALESCE(i.returned_qty, 0)) * (i.profit / i.qty)), 0) as store_fee
         FROM pos_transaction_items i
         JOIN pos_transactions t ON i.transaction_id = t.id
-        WHERE i.penitip = ? AND t.status != 'CANCELLED'
+        WHERE i.penitip = ? AND t.status != 'CANCELLED' AND (i.qty - COALESCE(i.returned_qty, 0)) > 0
       ''', [p]);
       final totalSold = (salesResult.first['total_sold'] as num).toInt();
       final totalGross = (salesResult.first['total_gross'] as num).toDouble();

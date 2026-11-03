@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:mobile_flutter/config/app_config.dart';
 import 'package:mobile_flutter/models/pos_cart_item.dart';
 import 'package:mobile_flutter/models/pos_product.dart';
+import 'package:mobile_flutter/models/pos_transaction.dart';
 import 'package:mobile_flutter/providers/printer_provider.dart';
 import 'package:mobile_flutter/services/pos_excel_service.dart';
 import 'package:mobile_flutter/services/printer_service.dart';
@@ -200,6 +201,81 @@ void main() {
     test('PosExcelService generates valid Excel template bytes', () {
       final bytes = PosExcelService.instance.generateTemplateBytes();
       expect(bytes.isNotEmpty, isTrue);
+    });
+
+    test('PosTransactionItem and PosTransaction handle partial returns accurately', () {
+      final item1 = PosTransactionItem(
+        id: 1,
+        transactionId: 10,
+        productKode: 'MN-001',
+        productName: 'Kopi Susu Aren',
+        unit: 'cup',
+        costPrice: 7000,
+        normalPrice: 15000,
+        soldPrice: 15000,
+        qty: 3,
+        returnedQty: 1, // 1 cup dikembalikan/diretur
+        subtotal: 45000,
+        profit: 24000,
+      );
+
+      expect(item1.activeQty, equals(2));
+      expect(item1.activeSubtotal, equals(30000));
+      expect(item1.activeProfit, equals(16000));
+      expect(item1.isPartiallyReturned, isTrue);
+      expect(item1.isFullyReturned, isFalse);
+
+      final item2 = PosTransactionItem(
+        id: 2,
+        transactionId: 10,
+        productKode: 'KS-001',
+        productName: 'Roti Bakar',
+        unit: 'pcs',
+        costPrice: 5000,
+        normalPrice: 7000,
+        soldPrice: 7000,
+        qty: 1,
+        returnedQty: 1, // Diretur penuh
+        subtotal: 7000,
+        profit: 2000,
+        penitip: 'Pak Joko',
+        dueToPenitip: 5000,
+      );
+
+      expect(item2.activeQty, equals(0));
+      expect(item2.isFullyReturned, isTrue);
+      expect(item2.activeDueToPenitip, equals(0.0));
+
+      final returnRecord = PosTransactionReturn(
+        transactionId: 10,
+        invoiceNo: 'POS-20261103-001',
+        productKode: 'KS-001',
+        productName: 'Roti Bakar',
+        qtyReturned: 1,
+        refundAmount: 7000,
+        reason: 'Kemasan rusak',
+        createdAt: DateTime.now(),
+      );
+
+      final trx = PosTransaction(
+        invoiceNo: 'POS-20261103-001',
+        dateTime: DateTime.now(),
+        totalAmount: 30000, // sisa setelah refund 7000 dan retur kopi
+        normalAmount: 52000,
+        discountAmount: 0,
+        profitAmount: 16000,
+        cashPaid: 55000,
+        changeDue: 3000,
+        status: 'PARTIAL_RETURN',
+        items: [item1, item2],
+        returns: [returnRecord],
+      );
+
+      expect(trx.isPartiallyReturned, isTrue);
+      expect(trx.isCancelled, isFalse);
+      expect(trx.totalActiveItemsQty, equals(2));
+      expect(trx.totalReturnedQty, equals(2));
+      expect(trx.totalRefundedAmount, equals(7000));
     });
   });
 }

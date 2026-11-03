@@ -1,3 +1,55 @@
+class PosTransactionReturn {
+  final int? id;
+  final int transactionId;
+  final String invoiceNo;
+  final String productKode;
+  final String productName;
+  final int qtyReturned;
+  final double refundAmount;
+  final String? reason;
+  final DateTime createdAt;
+
+  PosTransactionReturn({
+    this.id,
+    required this.transactionId,
+    required this.invoiceNo,
+    required this.productKode,
+    required this.productName,
+    required this.qtyReturned,
+    required this.refundAmount,
+    this.reason,
+    required this.createdAt,
+  });
+
+  Map<String, dynamic> toMap([int? trxId]) {
+    return {
+      if (id != null) 'id': id,
+      'transaction_id': trxId ?? transactionId,
+      'invoice_no': invoiceNo,
+      'product_kode': productKode,
+      'product_name': productName,
+      'qty_returned': qtyReturned,
+      'refund_amount': refundAmount,
+      'reason': reason,
+      'created_at': createdAt.toIso8601String(),
+    };
+  }
+
+  factory PosTransactionReturn.fromMap(Map<String, dynamic> map) {
+    return PosTransactionReturn(
+      id: map['id'] as int?,
+      transactionId: (map['transaction_id'] is num) ? (map['transaction_id'] as num).toInt() : 0,
+      invoiceNo: map['invoice_no']?.toString() ?? '',
+      productKode: map['product_kode']?.toString() ?? '',
+      productName: map['product_name']?.toString() ?? '',
+      qtyReturned: (map['qty_returned'] is num) ? (map['qty_returned'] as num).toInt() : 0,
+      refundAmount: (map['refund_amount'] is num) ? (map['refund_amount'] as num).toDouble() : 0.0,
+      reason: map['reason']?.toString(),
+      createdAt: DateTime.tryParse(map['created_at']?.toString() ?? '') ?? DateTime.now(),
+    );
+  }
+}
+
 class PosTransactionItem {
   final int? id;
   final int? transactionId;
@@ -8,6 +60,7 @@ class PosTransactionItem {
   final double normalPrice;
   final double soldPrice;
   final int qty;
+  final int returnedQty;
   final double subtotal;
   final double profit;
   final String? penitip;
@@ -24,6 +77,7 @@ class PosTransactionItem {
     required this.normalPrice,
     required this.soldPrice,
     required this.qty,
+    this.returnedQty = 0,
     required this.subtotal,
     required this.profit,
     this.penitip,
@@ -34,6 +88,17 @@ class PosTransactionItem {
   bool get isConsignment => penitip != null && penitip!.trim().isNotEmpty;
   bool get isBelowCost => soldPrice < costPrice;
   double get discountPerUnit => normalPrice - soldPrice;
+
+  // Nilai aktif setelah dikurangi barang yang diretur
+  int get activeQty => qty - returnedQty > 0 ? (qty - returnedQty) : 0;
+  bool get isFullyReturned => activeQty <= 0;
+  bool get isPartiallyReturned => returnedQty > 0 && activeQty > 0;
+  double get activeSubtotal => activeQty * soldPrice;
+  double get unitCost => costPrice;
+  double get unitProfit => soldPrice - costPrice;
+  double get activeProfit => activeQty * unitProfit;
+  double get unitDueToPenitip => qty > 0 ? (dueToPenitip / qty) : 0.0;
+  double get activeDueToPenitip => activeQty * unitDueToPenitip;
 
   Map<String, dynamic> toMap(int trxId) {
     return {
@@ -46,6 +111,7 @@ class PosTransactionItem {
       'normal_price': normalPrice,
       'sold_price': soldPrice,
       'qty': qty,
+      'returned_qty': returnedQty,
       'subtotal': subtotal,
       'profit': profit,
       'penitip': penitip,
@@ -65,6 +131,7 @@ class PosTransactionItem {
       normalPrice: (map['normal_price'] is num) ? (map['normal_price'] as num).toDouble() : 0.0,
       soldPrice: (map['sold_price'] is num) ? (map['sold_price'] as num).toDouble() : 0.0,
       qty: (map['qty'] is num) ? (map['qty'] as num).toInt() : 1,
+      returnedQty: (map['returned_qty'] is num) ? (map['returned_qty'] as num).toInt() : 0,
       subtotal: (map['subtotal'] is num) ? (map['subtotal'] as num).toDouble() : 0.0,
       profit: (map['profit'] is num) ? (map['profit'] as num).toDouble() : 0.0,
       penitip: map['penitip']?.toString(),
@@ -88,8 +155,9 @@ class PosTransaction {
   final String paymentMethod;
   final String? cashierName;
   final String? note;
-  final String status; // 'COMPLETED', 'CANCELLED', 'RETURNED'
+  final String status; // 'COMPLETED', 'PARTIAL_RETURN', 'CANCELLED'
   final List<PosTransactionItem> items;
+  final List<PosTransactionReturn> returns;
 
   PosTransaction({
     this.id,
@@ -107,9 +175,15 @@ class PosTransaction {
     this.note,
     this.status = 'COMPLETED',
     this.items = const [],
+    this.returns = const [],
   });
 
   bool get isCancelled => status == 'CANCELLED';
+  bool get isPartiallyReturned => status == 'PARTIAL_RETURN' || (items.any((it) => it.returnedQty > 0) && !isCancelled);
+  int get totalActiveItemsQty => items.fold(0, (sum, it) => sum + it.activeQty);
+  int get totalOriginalQty => items.fold(0, (sum, it) => sum + it.qty);
+  int get totalReturnedQty => items.fold(0, (sum, it) => sum + it.returnedQty);
+  double get totalRefundedAmount => returns.fold(0.0, (sum, r) => sum + r.refundAmount);
 
   Map<String, dynamic> toMap() {
     return {
@@ -130,7 +204,11 @@ class PosTransaction {
     };
   }
 
-  factory PosTransaction.fromMap(Map<String, dynamic> map, [List<PosTransactionItem> items = const []]) {
+  factory PosTransaction.fromMap(
+    Map<String, dynamic> map, [
+    List<PosTransactionItem> items = const [],
+    List<PosTransactionReturn> returns = const [],
+  ]) {
     return PosTransaction(
       id: map['id'] as int?,
       invoiceNo: map['invoice_no']?.toString() ?? '',
@@ -147,6 +225,7 @@ class PosTransaction {
       note: map['note']?.toString(),
       status: map['status']?.toString() ?? 'COMPLETED',
       items: items,
+      returns: returns,
     );
   }
 }
