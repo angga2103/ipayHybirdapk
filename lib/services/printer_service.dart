@@ -434,6 +434,26 @@ class PrinterService {
     }
   }
 
+  /// Cek apakah teks nama toko disembunyikan jika sudah mencetak logo (hemat kertas & anti dobel info)
+  Future<bool> isHideStoreNameWhenLogo() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getBool('printer_hide_name_when_logo') ?? true;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  /// Mengubah toggle sembunyikan nama toko saat logo aktif
+  Future<void> setHideStoreNameWhenLogo(bool hide) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('printer_hide_name_when_logo', hide);
+    } catch (e) {
+      debugPrint('[PrinterService] Error setHideStoreNameWhenLogo: $e');
+    }
+  }
+
   /// Mengambil profil toko yang tersimpan (Nama, Tagline, Footer, Toggle Logo)
   Future<Map<String, dynamic>> getStoreProfile() async {
     try {
@@ -615,23 +635,27 @@ class PrinterService {
         }
       }
 
-      // 2. Header Toko
-      final storeName = (storeInfo?['store_name'] ?? 'GARUDATEL POS').toString().toUpperCase();
-      final address = (storeInfo?['address'] ?? 'Pusat Pembayaran PPOB & Kasir').toString();
+      // 2. Header Toko (Boleh tidak dicetak jika sudah ada Logo untuk hemat kertas)
+      final hasLogo = logoEnabled && (await isLogoPrintEnabled());
+      final hideNameWhenLogo = await isHideStoreNameWhenLogo();
+      if (!hasLogo || !hideNameWhenLogo) {
+        final storeName = (storeInfo?['store_name'] ?? 'GARUDATEL POS').toString().toUpperCase();
+        final address = (storeInfo?['address'] ?? 'Pusat Pembayaran PPOB & Kasir').toString();
 
-      bytes += generator.text(
-        storeName,
-        styles: const PosStyles(
-          align: PosAlign.center,
-          bold: true,
-          height: PosTextSize.size2,
-          width: PosTextSize.size2,
-        ),
-      );
-      bytes += generator.text(
-        address,
-        styles: const PosStyles(align: PosAlign.center),
-      );
+        bytes += generator.text(
+          storeName,
+          styles: const PosStyles(
+            align: PosAlign.center,
+            bold: true,
+            height: PosTextSize.size2,
+            width: PosTextSize.size2,
+          ),
+        );
+        bytes += generator.text(
+          address,
+          styles: const PosStyles(align: PosAlign.center),
+        );
+      }
       bytes += generator.text(dividerLine, styles: const PosStyles(align: PosAlign.center));
 
       // Info Pengujian
@@ -729,23 +753,29 @@ class PrinterService {
         }
       }
 
-      // Header Toko
-      final name = (storeName ?? 'GARUDATEL POS').toUpperCase();
-      bytes += generator.text(
-        name,
-        styles: const PosStyles(
-          align: PosAlign.center,
-          bold: true,
-          height: PosTextSize.size2,
-          width: PosTextSize.size2,
-        ),
-      );
+      // Header Toko (Boleh tidak dicetak jika sudah ada Logo untuk hemat kertas & cegah dobel info)
+      final hasLogo = logoBytes != null && logoBytes.isNotEmpty;
+      final hideNameWhenLogo = await isHideStoreNameWhenLogo();
+      final shouldPrintStoreName = !hasLogo || !hideNameWhenLogo;
 
-      if (address != null && address.isNotEmpty) {
-        bytes += generator.text(address, styles: const PosStyles(align: PosAlign.center));
-      }
-      if (phone != null && phone.isNotEmpty) {
-        bytes += generator.text('Telp: $phone', styles: const PosStyles(align: PosAlign.center));
+      if (shouldPrintStoreName) {
+        final name = (storeName ?? 'GARUDATEL POS').toUpperCase();
+        bytes += generator.text(
+          name,
+          styles: const PosStyles(
+            align: PosAlign.center,
+            bold: true,
+            height: PosTextSize.size2,
+            width: PosTextSize.size2,
+          ),
+        );
+
+        if (address != null && address.isNotEmpty) {
+          bytes += generator.text(address, styles: const PosStyles(align: PosAlign.center));
+        }
+        if (phone != null && phone.isNotEmpty) {
+          bytes += generator.text('Telp: $phone', styles: const PosStyles(align: PosAlign.center));
+        }
       }
       bytes += generator.text(dividerLine, styles: const PosStyles(align: PosAlign.center));
 
@@ -834,12 +864,11 @@ class PrinterService {
     }
 
     final itemsFormatted = trx.items.map((it) {
-      final isModified = (it.normalPrice - it.soldPrice).abs() > 0.001;
       String? noteText;
+      // Catatan di struk hanya untuk info retur barang.
+      // Sesuai permintaan user: Perubahan harga kasir tidak dicetak di struk (hanya di riwayat untuk audit).
       if (it.returnedQty > 0) {
         noteText = it.isFullyReturned ? 'DIRETUR PENUH (-${it.returnedQty})' : 'Retur Sebagian (-${it.returnedQty})';
-      } else if (isModified) {
-        noteText = it.isBelowCost ? 'Bawah Modal' : 'Diskon Khusus';
       }
       return {
         'name': it.productName,
@@ -868,6 +897,13 @@ class PrinterService {
       effectiveFooter = '*** TERDAPAT BARANG DIRETUR ***\n$effectiveFooter';
     }
 
+    // Subtotal adalah jumlah riil transaksi seluruh item belanjaan
+    final double itemsSubtotal = trx.items.fold(
+      0.0,
+      (sum, it) => sum + (it.activeQty > 0 ? it.activeSubtotal : it.subtotal),
+    );
+    final double effectiveSubtotal = itemsSubtotal > 0 ? itemsSubtotal : trx.totalAmount;
+
     return await printReceipt(
       storeName: effectiveStoreName,
       address: effectiveAddress,
@@ -876,7 +912,7 @@ class PrinterService {
       date: dateFormatted,
       cashierName: trx.cashierName,
       items: itemsFormatted,
-      subtotal: formatRp(trx.normalAmount > 0 ? trx.normalAmount : trx.totalAmount),
+      subtotal: formatRp(effectiveSubtotal),
       discount: trx.discountAmount > 0 ? formatRp(trx.discountAmount) : null,
       total: formatRp(trx.totalAmount),
       paymentMethod: trx.paymentMethod,
@@ -911,9 +947,10 @@ class PrinterService {
       bytes += generator.reset();
 
       // Logo
+      Uint8List? logoBytes;
       final logoEnabled = await isLogoPrintEnabled();
       if (logoEnabled) {
-        Uint8List? logoBytes = await getCachedStoreLogo();
+        logoBytes = await getCachedStoreLogo();
         if (logoBytes == null || logoBytes.isEmpty) {
           try {
             final byteData = await rootBundle.load('assets/icon/app_logo.png');
@@ -1001,9 +1038,11 @@ class PrinterService {
       bytes += generator.reset();
 
       // Logo Toko (sama dengan struk PPOB & Admin Panel)
+      final storeProf = await getStoreProfile();
+      Uint8List? logoBytes;
       final logoEnabled = await isLogoPrintEnabled();
       if (logoEnabled) {
-        Uint8List? logoBytes = await getCachedStoreLogo();
+        logoBytes = await getCachedStoreLogo();
         if (logoBytes == null || logoBytes.isEmpty) {
           try {
             final byteData = await rootBundle.load('assets/icon/app_logo.png');
@@ -1016,15 +1055,18 @@ class PrinterService {
         }
       }
 
-      final storeProf = await getStoreProfile();
-      bytes += generator.text(
-        storeProf['name'] ?? 'IPAY',
-        styles: const PosStyles(align: PosAlign.center, bold: true, height: PosTextSize.size2, width: PosTextSize.size2),
-      );
-      bytes += generator.text(
-        storeProf['tagline'] ?? 'Platform PPOB & Kasir Toko',
-        styles: const PosStyles(align: PosAlign.center),
-      );
+      final hasLogo = logoBytes != null && logoBytes.isNotEmpty;
+      final hideNameWhenLogo = await isHideStoreNameWhenLogo();
+      if (!hasLogo || !hideNameWhenLogo) {
+        bytes += generator.text(
+          storeProf['name'] ?? 'IPAY',
+          styles: const PosStyles(align: PosAlign.center, bold: true, height: PosTextSize.size2, width: PosTextSize.size2),
+        );
+        bytes += generator.text(
+          storeProf['tagline'] ?? 'Platform PPOB & Kasir Toko',
+          styles: const PosStyles(align: PosAlign.center),
+        );
+      }
       bytes += generator.text(dividerLine, styles: const PosStyles(align: PosAlign.center));
 
       bytes += generator.text(
@@ -1099,9 +1141,10 @@ class PrinterService {
       bytes += generator.reset();
 
       // Logo
+      Uint8List? logoBytes;
       final logoEnabled = await isLogoPrintEnabled();
       if (logoEnabled) {
-        Uint8List? logoBytes = await getCachedStoreLogo();
+        logoBytes = await getCachedStoreLogo();
         if (logoBytes == null || logoBytes.isEmpty) {
           try {
             final byteData = await rootBundle.load('assets/icon/app_logo.png');
@@ -1118,19 +1161,23 @@ class PrinterService {
         return 'Rp ${val.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]}.')}';
       }
 
-      final storeProf = await getStoreProfile();
-      final effectiveName = storeName ?? storeProf['name'] ?? 'IPAY';
-      final effectiveTagline = storeProf['tagline'] ?? 'Platform PPOB Terpercaya';
+      final hasLogo = logoBytes != null && logoBytes.isNotEmpty;
+      final hideNameWhenLogo = await isHideStoreNameWhenLogo();
+      if (!hasLogo || !hideNameWhenLogo) {
+        final storeProf = await getStoreProfile();
+        final effectiveName = storeName ?? storeProf['name'] ?? 'IPAY';
+        final effectiveTagline = storeProf['tagline'] ?? 'Platform PPOB Terpercaya';
 
-      bytes += generator.text(
-        effectiveName.toUpperCase(),
-        styles: const PosStyles(align: PosAlign.center, bold: true, height: PosTextSize.size1, width: PosTextSize.size1),
-      );
-      if (effectiveTagline.isNotEmpty) {
         bytes += generator.text(
-          effectiveTagline,
-          styles: const PosStyles(align: PosAlign.center),
+          effectiveName.toUpperCase(),
+          styles: const PosStyles(align: PosAlign.center, bold: true, height: PosTextSize.size1, width: PosTextSize.size1),
         );
+        if (effectiveTagline.isNotEmpty) {
+          bytes += generator.text(
+            effectiveTagline,
+            styles: const PosStyles(align: PosAlign.center),
+          );
+        }
       }
       bytes += generator.feed(1);
 

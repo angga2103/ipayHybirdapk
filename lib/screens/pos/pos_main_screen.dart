@@ -2245,6 +2245,45 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                               ),
                               child: Text('RETUR', style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: Colors.amber.shade900)),
                             ),
+                          // Indikator Audit Perubahan Harga Kasir (Beda Warna)
+                          if (!isCancelled) ...[
+                            if (trx.items.any((it) => it.isBelowCost)) ...[
+                              const SizedBox(width: 4),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: Colors.red.shade50,
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(color: Colors.red.shade300),
+                                ),
+                                child: Text('⚠️ BAWAH MODAL', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Colors.red.shade800)),
+                              ),
+                            ],
+                            if (trx.items.any((it) => it.soldPrice < it.normalPrice - 0.001)) ...[
+                              const SizedBox(width: 4),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFFEF3C7),
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(color: const Color(0xFFF59E0B)),
+                                ),
+                                child: const Text('🏷️ DISKON', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Color(0xFFB45309))),
+                              ),
+                            ],
+                            if (trx.items.any((it) => it.soldPrice > it.normalPrice + 0.001)) ...[
+                              const SizedBox(width: 4),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFE0F2FE),
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(color: const Color(0xFF38BDF8)),
+                                ),
+                                child: const Text('🏷️ HARGA NAIK', style: TextStyle(fontSize: 8, fontWeight: FontWeight.bold, color: Color(0xFF0369A1))),
+                              ),
+                            ],
+                          ],
                         ],
                       ),
                       const SizedBox(height: 3),
@@ -2421,7 +2460,9 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                         const SizedBox(height: 8),
 
                         ...currentTrx.items.map((item) {
-                          final isItemModified = (item.normalPrice - item.soldPrice).abs() > 0.001;
+                          final isPriceDecreased = item.soldPrice < item.normalPrice - 0.001;
+                          final isPriceIncreased = item.soldPrice > item.normalPrice + 0.001;
+                          final double priceDiff = (item.soldPrice - item.normalPrice).abs();
                           final bool canReturnItem = !isCancelled && item.activeQty > 0;
 
                           return Container(
@@ -2477,9 +2518,63 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                                           ),
                                           const SizedBox(height: 2),
                                           Text(
-                                            '${item.productKode} • Harga: ${_currencyFormat.format(item.soldPrice)}/${item.unit}${isItemModified ? " (Normal: ${_currencyFormat.format(item.normalPrice)})" : ""}',
+                                            '${item.productKode} • Harga Jual: ${_currencyFormat.format(item.soldPrice)}/${item.unit}',
                                             style: const TextStyle(fontSize: 10.5, color: Color(0xFF64748B)),
                                           ),
+                                          if (isPriceDecreased) ...[
+                                            const SizedBox(height: 4),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFFFEF3C7),
+                                                borderRadius: BorderRadius.circular(6),
+                                                border: Border.all(color: const Color(0xFFF59E0B)),
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  const Icon(Icons.arrow_downward_rounded, size: 12, color: Color(0xFFB45309)),
+                                                  const SizedBox(width: 3),
+                                                  Text(
+                                                    'Didiskon Kasir: -${_currencyFormat.format(priceDiff)} (Normal: ${_currencyFormat.format(item.normalPrice)})',
+                                                    style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: Color(0xFFB45309)),
+                                                  ),
+                                                  if (item.isBelowCost) ...[
+                                                    const SizedBox(width: 4),
+                                                    Container(
+                                                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                                      decoration: BoxDecoration(
+                                                        color: Colors.red.shade700,
+                                                        borderRadius: BorderRadius.circular(4),
+                                                      ),
+                                                      child: const Text('Bawah Modal', style: TextStyle(fontSize: 8, color: Colors.white, fontWeight: FontWeight.bold)),
+                                                    ),
+                                                  ],
+                                                ],
+                                              ),
+                                            ),
+                                          ] else if (isPriceIncreased) ...[
+                                            const SizedBox(height: 4),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                                              decoration: BoxDecoration(
+                                                color: const Color(0xFFE0F2FE),
+                                                borderRadius: BorderRadius.circular(6),
+                                                border: Border.all(color: const Color(0xFF0284C7)),
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  const Icon(Icons.arrow_upward_rounded, size: 12, color: Color(0xFF0369A1)),
+                                                  const SizedBox(width: 3),
+                                                  Text(
+                                                    'Dinaikkan Kasir: +${_currencyFormat.format(priceDiff)} (Normal: ${_currencyFormat.format(item.normalPrice)})',
+                                                    style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: Color(0xFF0369A1)),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ],
                                         ],
                                       ),
                                     ),

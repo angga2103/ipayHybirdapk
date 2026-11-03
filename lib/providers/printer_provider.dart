@@ -15,6 +15,7 @@ class PrinterProvider extends ChangeNotifier {
   bool _isScanning = false;
   PaperSize _paperSize = PaperSize.mm58;
   bool _isLogoPrintEnabled = true;
+  bool _hideNameWhenLogo = true;
   String? _errorMessage;
 
   // Getters
@@ -25,6 +26,7 @@ class PrinterProvider extends ChangeNotifier {
   bool get isScanning => _isScanning;
   PaperSize get paperSize => _paperSize;
   bool get isLogoPrintEnabled => _isLogoPrintEnabled;
+  bool get hideNameWhenLogo => _hideNameWhenLogo;
   String? get errorMessage => _errorMessage;
 
   /// Inisialisasi awal: Muat printer tersimpan dan cek status koneksi
@@ -33,6 +35,7 @@ class PrinterProvider extends ChangeNotifier {
     _connectedMac = await _service.getSavedMac();
     _connectedName = await StorageService.instance.getSavedPrinterName();
     _isLogoPrintEnabled = await _service.isLogoPrintEnabled();
+    _hideNameWhenLogo = await _service.isHideStoreNameWhenLogo();
 
     await checkConnection();
     await scanDevices();
@@ -137,6 +140,13 @@ class PrinterProvider extends ChangeNotifier {
   Future<void> setLogoPrintEnabled(bool enabled) async {
     _isLogoPrintEnabled = enabled;
     await _service.setLogoPrintEnabled(enabled);
+    notifyListeners();
+  }
+
+  /// Mengubah toggle sembunyikan nama toko jika sudah pakai logo (hemat kertas)
+  Future<void> setHideNameWhenLogo(bool hide) async {
+    _hideNameWhenLogo = hide;
+    await _service.setHideStoreNameWhenLogo(hide);
     notifyListeners();
   }
 

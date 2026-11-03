@@ -449,40 +449,83 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.grey.shade200),
       ),
-      child: Row(
+      child: Column(
         children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(
-              color: AppConfig.primaryTeal.withValues(alpha: 0.1),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: const Icon(Icons.image_outlined, color: AppConfig.primaryTeal, size: 24),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Cetak Logo di Struk',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87),
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: AppConfig.primaryTeal.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(12),
                 ),
-                const SizedBox(height: 2),
-                Text(
-                  'Cetak gambar logo toko di bagian atas struk thermal',
-                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                child: const Icon(Icons.image_outlined, color: AppConfig.primaryTeal, size: 24),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Cetak Logo di Struk',
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Cetak gambar logo toko di bagian atas struk thermal',
+                      style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                    ),
+                  ],
+                ),
+              ),
+              Switch.adaptive(
+                value: provider.isLogoPrintEnabled,
+                activeTrackColor: AppConfig.primaryTeal,
+                onChanged: (val) {
+                  provider.setLogoPrintEnabled(val);
+                },
+              ),
+            ],
+          ),
+          if (provider.isLogoPrintEnabled) ...[
+            const Divider(height: 18),
+            Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.shade50,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(Icons.content_cut_rounded, color: Colors.amber.shade800, size: 20),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Hemat Kertas (Hanya Logo)',
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.black87),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'Sembunyikan teks nama & tagline toko karena sudah ada di logo gambar',
+                        style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                      ),
+                    ],
+                  ),
+                ),
+                Switch.adaptive(
+                  value: provider.hideNameWhenLogo,
+                  activeTrackColor: AppConfig.primaryTeal,
+                  onChanged: (val) {
+                    provider.setHideNameWhenLogo(val);
+                  },
                 ),
               ],
             ),
-          ),
-          Switch.adaptive(
-            value: provider.isLogoPrintEnabled,
-            activeTrackColor: AppConfig.primaryTeal,
-            onChanged: (val) {
-              provider.setLogoPrintEnabled(val);
-            },
-          ),
+          ],
         ],
       ),
     );
