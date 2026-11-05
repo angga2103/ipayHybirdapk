@@ -124,10 +124,15 @@ class AppUpdateService {
       if (response.statusCode == 200) {
         final responseBody = await response.transform(utf8.decoder).join();
         final Map<String, dynamic> data = jsonDecode(responseBody);
+        final rawDownloadUrl = (data['download_url'] ?? '').toString();
+        final cleanDownloadUrl = (rawDownloadUrl.isNotEmpty && !rawDownloadUrl.contains('github.com'))
+            ? rawDownloadUrl
+            : '${AppConfig.baseUrl}/download/apk';
+
         return AppUpdateInfo(
           tagName: data['tag_name'] ?? 'v2.1.0',
           size: data['size'] is int ? data['size'] : int.tryParse(data['size']?.toString() ?? '0') ?? 0,
-          downloadUrl: data['download_url'] ?? '${AppConfig.baseUrl}/download/apk',
+          downloadUrl: cleanDownloadUrl,
         );
       }
     } catch (_) {
@@ -281,9 +286,10 @@ class AppUpdateService {
                     child: ElevatedButton.icon(
                       onPressed: () async {
                         Navigator.pop(modalContext);
-                        final downloadUri = Uri.parse(
-                          info.downloadUrl.isNotEmpty ? info.downloadUrl : '${AppConfig.baseUrl}/download/apk',
-                        );
+                        final targetUrl = (info.downloadUrl.isNotEmpty && !info.downloadUrl.contains('github.com'))
+                            ? info.downloadUrl
+                            : '${AppConfig.baseUrl}/download/apk';
+                        final downloadUri = Uri.parse(targetUrl);
                         if (await canLaunchUrl(downloadUri)) {
                           await launchUrl(downloadUri, mode: LaunchMode.externalApplication);
                         }
