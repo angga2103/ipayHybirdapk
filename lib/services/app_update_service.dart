@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../config/app_config.dart';
 
@@ -16,7 +17,7 @@ class AppUpdateInfo {
   });
 
   String get sizeFormatted {
-    if (size <= 0) return '~31.4 MB';
+    if (size <= 0) return '~31.5 MB';
     final mb = size / (1024 * 1024);
     return '${mb.toStringAsFixed(1)} MB';
   }
@@ -78,6 +79,11 @@ class AppUpdateService {
                 ),
               ],
             ),
+            action: SnackBarAction(
+              label: 'Apa yang Baru?',
+              textColor: Colors.amberAccent,
+              onPressed: () => showWhatsNewDialog(context, force: true),
+            ),
             backgroundColor: AppConfig.primaryTeal,
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -110,6 +116,192 @@ class AppUpdateService {
     }
   }
 
+  /// Menampilkan dialog "Apa yang Baru" setelah pengguna memasang / membuka pembaruan
+  Future<void> showWhatsNewDialog(BuildContext context, {bool force = false}) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final lastSeen = prefs.getString('last_seen_whats_new_version');
+
+      if (!force && lastSeen == AppConfig.appVersion) {
+        return; // Sudah pernah dilihat pada versi ini
+      }
+
+      if (!context.mounted) return;
+
+      await showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (modalContext) {
+          return Container(
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: AppConfig.primaryLight,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(Icons.auto_awesome, color: AppConfig.primaryTeal, size: 26),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Apa yang Baru di IPAY',
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.bold,
+                              color: AppConfig.textDark,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Versi v${AppConfig.appVersion} • Fitur Pintar & Kasir Modern',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppConfig.primaryTeal,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppConfig.backgroundSoft,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                  ),
+                  child: Column(
+                    children: [
+                      _buildWhatsNewItem(
+                        icon: Icons.photo_camera_rounded,
+                        color: AppConfig.primaryTeal,
+                        title: 'Foto Produk Offline & Auto-Kompresi',
+                        desc: 'Simpan foto langsung di memori HP tanpa kuota, super hemat & anti-lag.',
+                      ),
+                      const Divider(height: 14, color: Color(0xFFE2E8F0)),
+                      _buildWhatsNewItem(
+                        icon: Icons.auto_awesome,
+                        color: Colors.purple,
+                        title: 'Auto-Generate Kode Produk',
+                        desc: 'Otomatis membuat kode singkatan rapi saat tambah manual atau import Excel.',
+                      ),
+                      const Divider(height: 14, color: Color(0xFFE2E8F0)),
+                      _buildWhatsNewItem(
+                        icon: Icons.qr_code_scanner_rounded,
+                        color: Colors.blue.shade700,
+                        title: 'Scanner Barcode Kamera Cepat',
+                        desc: 'Pindai barcode kemasan barang langsung menggunakan kamera HP kasir.',
+                      ),
+                      const Divider(height: 14, color: Color(0xFFE2E8F0)),
+                      _buildWhatsNewItem(
+                        icon: Icons.pause_circle_outline_rounded,
+                        color: Colors.amber.shade800,
+                        title: 'Tahan Antrean (Hold Cart)',
+                        desc: 'Tahan transaksi aktif sementara untuk melayani pelanggan berikutnya.',
+                      ),
+                      const Divider(height: 14, color: Color(0xFFE2E8F0)),
+                      _buildWhatsNewItem(
+                        icon: Icons.chat_bubble_outline_rounded,
+                        color: const Color(0xFF25D366),
+                        title: 'Kirim Struk via WhatsApp',
+                        desc: 'Bagikan nota belanja digital ke WhatsApp pembeli secara instan & rapi.',
+                      ),
+                      const Divider(height: 14, color: Color(0xFFE2E8F0)),
+                      _buildWhatsNewItem(
+                        icon: Icons.receipt_long_rounded,
+                        color: Colors.indigo,
+                        title: 'Struk Thermal Rapi & Hemat Kertas',
+                        desc: 'Format struk bersih tanpa label diskon ganda, otomatis hemat kertas.',
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton(
+                  onPressed: () {
+                    Navigator.pop(modalContext);
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppConfig.primaryTeal,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: const Text('Mengerti & Siap Digunakan', style: TextStyle(fontWeight: FontWeight.bold)),
+                ),
+              ],
+            ),
+          );
+        },
+      );
+
+      await prefs.setString('last_seen_whats_new_version', AppConfig.appVersion);
+    } catch (e) {
+      debugPrint('[AppUpdateService] Error showWhatsNewDialog: $e');
+    }
+  }
+
+  Widget _buildWhatsNewItem({
+    required IconData icon,
+    required Color color,
+    required String title,
+    required String desc,
+  }) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(6),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, color: color, size: 18),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(title, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: AppConfig.textDark)),
+              const SizedBox(height: 1),
+              Text(desc, style: const TextStyle(fontSize: 11, color: AppConfig.textMuted)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   /// Mengambil metadata versi dari web server
   Future<AppUpdateInfo?> _fetchLatestVersionInfo() async {
     final client = HttpClient();
@@ -130,7 +322,7 @@ class AppUpdateService {
             : '${AppConfig.baseUrl}/download/apk';
 
         return AppUpdateInfo(
-          tagName: data['tag_name'] ?? 'v2.1.0',
+          tagName: data['tag_name'] ?? 'v2.1.2',
           size: data['size'] is int ? data['size'] : int.tryParse(data['size']?.toString() ?? '0') ?? 0,
           downloadUrl: cleanDownloadUrl,
         );
@@ -143,7 +335,7 @@ class AppUpdateService {
     return null;
   }
 
-  /// Membandingkan semver string (misal: '2.1.0' vs '2.0.0' atau '1.0.7')
+  /// Membandingkan semver string (misal: '2.1.2' vs '2.1.1' atau '2.0.0')
   bool _isVersionNewer(String remote, String local) {
     try {
       final remoteParts = remote.replaceAll(RegExp(r'[^0-9.]'), '').split('.').map(int.parse).toList();
@@ -250,11 +442,12 @@ class AppUpdateService {
                       ),
                     ),
                     const SizedBox(height: 6),
-                    _buildFeatureItem('Sistem Kasir POS Offline & Database Lokal HP'),
-                    _buildFeatureItem('Cetak Struk Bluetooth Thermal 58mm & 80mm'),
-                    _buildFeatureItem('Mode Tampilan List & Grid di Layar Kasir'),
-                    _buildFeatureItem('Fitur Retur & Pembatalan Barang Transaksi'),
-                    _buildFeatureItem('Penyelesaian Konsinyasi & Import/Export Excel'),
+                    _buildFeatureItem('📸 Foto Produk Offline & Auto-Kompresi (Hemat Memori)'),
+                    _buildFeatureItem('🪄 Auto-Generate Kode Produk dari Singkatan Nama Barang'),
+                    _buildFeatureItem('📷 Scanner Barcode Kamera Cepat di Kasir POS'),
+                    _buildFeatureItem('⏸️ Tahan Antrean (Hold Cart) untuk Layanan Fleksibel'),
+                    _buildFeatureItem('📲 Kirim Struk Digital via WhatsApp'),
+                    _buildFeatureItem('🧾 Cetak Thermal Rapi, Bersih & Hemat Kertas'),
                   ],
                 ),
               ),

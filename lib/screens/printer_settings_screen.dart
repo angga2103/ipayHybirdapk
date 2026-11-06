@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../config/app_config.dart';
 import '../providers/printer_provider.dart';
+import '../services/app_update_service.dart';
 import 'webview_screen.dart';
 
 /// Halaman Pengaturan Bluetooth Thermal POS Printer
@@ -136,6 +137,10 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
 
                 // 5. KONEKSI MANUAL
                 _buildManualConnectionSection(context, provider),
+                const SizedBox(height: 16),
+
+                // 6. INFORMASI & CEK PEMBARUAN APK
+                _buildAppUpdateSection(context),
                 const SizedBox(height: 30),
               ],
             ),
@@ -868,6 +873,81 @@ class _PrinterSettingsScreenState extends State<PrinterSettingsScreen> {
                   }
                 },
                 child: const Text('Sambungkan', style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ==========================================
+  // 6. INFORMASI & CEK PEMBARUAN APK
+  // ==========================================
+  Widget _buildAppUpdateSection(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.shade200),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppConfig.primaryLight,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.system_update_rounded, color: AppConfig.primaryTeal, size: 20),
+              ),
+              const SizedBox(width: 10),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Pembaruan Aplikasi IPAY',
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.black87),
+                    ),
+                    Text(
+                      'Versi terpasang: v${AppConfig.appVersion}',
+                      style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: () => AppUpdateService().checkForUpdate(context, silent: false),
+                  icon: const Icon(Icons.refresh_rounded, size: 16),
+                  label: const Text('Cek Pembaruan APK', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppConfig.primaryTeal,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 10),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                onPressed: () => AppUpdateService().showWhatsNewDialog(context, force: true),
+                icon: const Icon(Icons.auto_awesome, size: 15, color: AppConfig.primaryTeal),
+                label: const Text('Apa yang Baru', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: AppConfig.primaryTeal)),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
               ),
             ],
           ),

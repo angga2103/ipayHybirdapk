@@ -93,6 +93,12 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
           ],
         ),
         actions: [
+          // Tombol Cek Pembaruan APK
+          IconButton(
+            icon: const Icon(Icons.system_update_rounded, color: AppConfig.primaryTeal, size: 21),
+            tooltip: 'Cek Pembaruan APK',
+            onPressed: () => AppUpdateService().checkForUpdate(context, silent: false),
+          ),
           // Indikator Status Printer
           InkWell(
             onTap: () {
@@ -2371,6 +2377,98 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                           }
                         },
                       ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 12),
+
+          // Card Informasi & Cek Pembaruan APK
+          Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: AppConfig.primaryLight,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(Icons.system_update_rounded, size: 20, color: AppConfig.primaryTeal),
+                        ),
+                        const SizedBox(width: 10),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                const Text(
+                                  'Aplikasi IPAY Android',
+                                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                                ),
+                                const SizedBox(width: 6),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: AppConfig.primaryTeal.withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: const Text(
+                                    'v${AppConfig.appVersion}',
+                                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: AppConfig.primaryTeal),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const Text(
+                              'Kasir POS Offline • Bluetooth ESC/POS Native',
+                              style: TextStyle(fontSize: 10.5, color: Color(0xFF64748B)),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton.icon(
+                        icon: const Icon(Icons.refresh_rounded, size: 16),
+                        label: const Text('Cek Pembaruan APK', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppConfig.primaryTeal,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                        ),
+                        onPressed: () => AppUpdateService().checkForUpdate(context, silent: false),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    OutlinedButton.icon(
+                      icon: const Icon(Icons.auto_awesome, size: 15, color: AppConfig.primaryTeal),
+                      label: const Text('Fitur Baru', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppConfig.primaryTeal)),
+                      style: OutlinedButton.styleFrom(
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                      ),
+                      onPressed: () => AppUpdateService().showWhatsNewDialog(context, force: true),
                     ),
                   ],
                 ),
