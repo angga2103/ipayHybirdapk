@@ -13,6 +13,7 @@ class PosProduct {
   final String productType; // 'shop' (barang toko), 'consignment' (titipan), 'service' (jasa/tanpa stok)
   final String commissionType; // 'markup' (selisih harga), 'nominal' (komisi per pcs), 'percent' (persentase omset)
   final double commissionValue; // nominal komisi atau angka persentase (misal 10%)
+  final String? imagePath; // path lokal file gambar terkompresi di memori HP
   final bool isArchived; // true jika dihapus secara soft-delete
   final DateTime? createdAt;
   final DateTime? updatedAt;
@@ -32,6 +33,7 @@ class PosProduct {
     this.productType = 'shop',
     this.commissionType = 'markup',
     this.commissionValue = 0.0,
+    this.imagePath,
     this.isArchived = false,
     this.createdAt,
     this.updatedAt,
@@ -93,6 +95,7 @@ class PosProduct {
       'product_type': productType,
       'commission_type': commissionType,
       'commission_value': commissionValue,
+      'image_path': (imagePath != null && imagePath!.trim().isNotEmpty) ? imagePath!.trim() : null,
       'is_archived': isArchived ? 1 : 0,
       'created_at': createdAt?.toIso8601String() ?? DateTime.now().toIso8601String(),
       'updated_at': DateTime.now().toIso8601String(),
@@ -119,6 +122,7 @@ class PosProduct {
       productType: map['product_type']?.toString() ?? ((map['penitip'] != null && map['penitip'].toString().trim().isNotEmpty) ? 'consignment' : 'shop'),
       commissionType: map['commission_type']?.toString() ?? 'markup',
       commissionValue: (map['commission_value'] is num) ? (map['commission_value'] as num).toDouble() : 0.0,
+      imagePath: map['image_path']?.toString(),
       isArchived: (map['is_archived'] == 1 || map['is_archived'] == true),
       createdAt: map['created_at'] != null ? DateTime.tryParse(map['created_at'].toString()) : null,
       updatedAt: map['updated_at'] != null ? DateTime.tryParse(map['updated_at'].toString()) : null,
@@ -140,6 +144,7 @@ class PosProduct {
     String? productType,
     String? commissionType,
     double? commissionValue,
+    String? imagePath,
     bool? isArchived,
   }) {
     return PosProduct(
@@ -157,6 +162,7 @@ class PosProduct {
       productType: productType ?? this.productType,
       commissionType: commissionType ?? this.commissionType,
       commissionValue: commissionValue ?? this.commissionValue,
+      imagePath: imagePath ?? this.imagePath,
       isArchived: isArchived ?? this.isArchived,
       createdAt: createdAt,
       updatedAt: DateTime.now(),

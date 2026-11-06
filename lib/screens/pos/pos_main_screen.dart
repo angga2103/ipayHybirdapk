@@ -7,9 +7,15 @@ import '../../models/pos_product.dart';
 import '../../models/pos_transaction.dart';
 import '../../providers/pos_provider.dart';
 import '../../providers/printer_provider.dart';
+import 'dart:io';
+import 'package:image_picker/image_picker.dart';
 import '../../services/app_update_service.dart';
 import '../../services/pos_database_service.dart';
+import '../../services/pos_image_service.dart';
+import '../../services/pos_product_helper.dart';
+import '../../services/pos_whatsapp_service.dart';
 import '../printer_settings_screen.dart';
+import 'pos_scanner_modal.dart';
 
 class PosMainScreen extends StatefulWidget {
   const PosMainScreen({super.key});
@@ -215,6 +221,22 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                         ),
                       ),
                       const SizedBox(width: 8),
+                      // Tombol Scan Barcode Kamera Cepat
+                      Container(
+                        height: 44,
+                        width: 44,
+                        decoration: BoxDecoration(
+                          color: AppConfig.primaryTeal.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: AppConfig.primaryTeal.withValues(alpha: 0.25)),
+                        ),
+                        child: IconButton(
+                          icon: const Icon(Icons.qr_code_scanner_rounded, color: AppConfig.primaryTeal, size: 22),
+                          tooltip: 'Scan Barcode Kamera Cepat',
+                          onPressed: () => PosScannerModal.show(context, pos),
+                        ),
+                      ),
+                      const SizedBox(width: 8),
                       // Tombol Ganti Mode Grid / List
                       Container(
                         height: 44,
@@ -236,6 +258,46 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                       ),
                     ],
                   ),
+
+                  // Banner Antrean Pesanan Ditahan (Hold Cart)
+                  if (pos.holdCartsCount > 0) ...[
+                    const SizedBox(height: 8),
+                    InkWell(
+                      onTap: () => _showHoldCartsSheet(context, pos),
+                      borderRadius: BorderRadius.circular(10),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.shade50,
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: Colors.amber.shade300),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(Icons.pause_circle_outline_rounded, size: 18, color: Colors.amber.shade900),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                '${pos.holdCartsCount} Transaksi Ditahan (Antrean)',
+                                style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: Colors.amber.shade900),
+                              ),
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              decoration: BoxDecoration(
+                                color: Colors.amber.shade600,
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: const Text(
+                                'Buka / Pulihkan',
+                                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w900, color: Colors.white),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
 
                   const SizedBox(height: 10),
 
@@ -275,7 +337,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                           padding: const EdgeInsets.fromLTRB(14, 12, 14, 100),
                           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                             crossAxisCount: 2,
-                            childAspectRatio: 0.88,
+                            childAspectRatio: 0.72,
                             crossAxisSpacing: 10,
                             mainAxisSpacing: 10,
                           ),
@@ -365,7 +427,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
       child: Opacity(
         opacity: isOutOfStock ? 0.65 : 1.0,
         child: Container(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(10),
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(16),
@@ -384,66 +446,110 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
+              // 1. Foto Produk / Placeholder dengan Tombol Kamera Cepat
+              Stack(
+                children: [
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(10),
+                    child: Container(
+                      height: 72,
+                      width: double.infinity,
+                      color: const Color(0xFFF1F5F9),
+                      child: (product.imagePath != null && product.imagePath!.isNotEmpty && File(product.imagePath!).existsSync())
+                          ? Image.file(
+                              File(product.imagePath!),
+                              fit: BoxFit.cover,
+                              errorBuilder: (context, error, stackTrace) => _buildPlaceholderPhoto(product),
+                            )
+                          : _buildPlaceholderPhoto(product),
+                    ),
+                  ),
+                  // Tombol Tambah / Edit Foto Cepat
+                  Positioned(
+                    right: 4,
+                    bottom: 4,
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        onTap: () => _showPhotoSourcePicker(context, pos, product),
+                        borderRadius: BorderRadius.circular(14),
+                        child: Container(
+                          padding: const EdgeInsets.all(4.5),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.6),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            (product.imagePath != null && product.imagePath!.isNotEmpty)
+                                ? Icons.edit
+                                : Icons.add_a_photo_outlined,
+                            size: 12,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  if (product.isConsignment)
+                    Positioned(
+                      left: 4,
+                      top: 4,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.shade600,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text(
+                          'Titipan',
+                          style: TextStyle(fontSize: 7.5, fontWeight: FontWeight.w900, color: Colors.white),
+                        ),
+                      ),
+                    ),
+                  if (isOutOfStock)
+                    Positioned(
+                      right: 4,
+                      top: 4,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: Colors.red.shade700,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Text(
+                          'HABIS',
+                          style: TextStyle(fontSize: 7.5, fontWeight: FontWeight.w900, color: Colors.white),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 4),
+
+              // 2. Kode & Nama Produk
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        product.kode,
-                        style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)),
-                      ),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (product.isConsignment) ...[
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                              decoration: BoxDecoration(
-                                color: Colors.amber.shade50,
-                                borderRadius: BorderRadius.circular(4),
-                                border: Border.all(color: Colors.amber.shade300),
-                              ),
-                              child: Text(
-                                'Titipan',
-                                style: TextStyle(fontSize: 8, fontWeight: FontWeight.w800, color: Colors.amber.shade900),
-                              ),
-                            ),
-                            const SizedBox(width: 4),
-                          ],
-                          if (isOutOfStock)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                              decoration: BoxDecoration(
-                                color: Colors.red.shade50,
-                                borderRadius: BorderRadius.circular(4),
-                                border: Border.all(color: Colors.red.shade300),
-                              ),
-                              child: Text(
-                                'HABIS',
-                                style: TextStyle(fontSize: 8, fontWeight: FontWeight.w900, color: Colors.red.shade800),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ],
+                  Text(
+                    product.kode,
+                    style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)),
                   ),
-                  const SizedBox(height: 4),
                   Text(
                     product.nama,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 12,
+                      fontSize: 11.5,
                       fontWeight: FontWeight.w800,
                       color: isOutOfStock ? const Color(0xFF64748B) : const Color(0xFF0F172A),
-                      height: 1.2,
+                      height: 1.15,
                       decoration: isOutOfStock ? TextDecoration.lineThrough : null,
                     ),
                   ),
                 ],
               ),
+
+              // 3. Harga & Keterangan Stok
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -454,24 +560,24 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                       Text(
                         _currencyFormat.format(product.hargaJual),
                         style: TextStyle(
-                          fontSize: 13,
+                          fontSize: 12.5,
                           fontWeight: FontWeight.w900,
                           color: isOutOfStock ? Colors.grey : AppConfig.primaryTeal,
                         ),
                       ),
                       Text(
                         '/${product.unit}',
-                        style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8)),
+                        style: const TextStyle(fontSize: 9.5, color: Color(0xFF94A3B8)),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 1),
                   Text(
                     product.isUnlimitedStock
                         ? 'Stok: Bebas (∞)'
                         : (isOutOfStock ? 'Stok: Habis' : 'Stok: ${product.stok} ${product.unit}'),
                     style: TextStyle(
-                      fontSize: 9.5,
+                      fontSize: 9,
                       fontWeight: FontWeight.w600,
                       color: isOutOfStock
                           ? Colors.red.shade700
@@ -483,6 +589,26 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildPlaceholderPhoto(PosProduct product) {
+    return Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(
+            product.isConsignment ? Icons.handshake_outlined : Icons.inventory_2_outlined,
+            size: 26,
+            color: product.isConsignment ? Colors.amber.shade700 : const Color(0xFF94A3B8),
+          ),
+          const SizedBox(height: 2),
+          Text(
+            product.kategori.isNotEmpty ? product.kategori : 'Produk',
+            style: const TextStyle(fontSize: 9, color: Color(0xFF94A3B8), fontWeight: FontWeight.w600),
+          ),
+        ],
       ),
     );
   }
@@ -537,32 +663,52 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
             child: Row(
               children: [
-                // Inisial / Icon Box
-                Container(
-                  width: 42,
-                  height: 42,
-                  decoration: BoxDecoration(
-                    color: isOutOfStock
-                        ? Colors.grey.shade100
-                        : (product.isConsignment ? Colors.amber.shade50 : AppConfig.primaryTeal.withValues(alpha: 0.1)),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
+                // Thumbnail / Inisial / Icon Box
+                GestureDetector(
+                  onTap: () => _showPhotoSourcePicker(context, pos, product),
+                  child: Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
                       color: isOutOfStock
-                          ? Colors.grey.shade300
-                          : (product.isConsignment ? Colors.amber.shade300 : AppConfig.primaryTeal.withValues(alpha: 0.2)),
-                    ),
-                  ),
-                  child: Center(
-                    child: Text(
-                      product.nama.isNotEmpty ? product.nama[0].toUpperCase() : 'P',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w900,
+                          ? Colors.grey.shade100
+                          : (product.isConsignment ? Colors.amber.shade50 : AppConfig.primaryTeal.withValues(alpha: 0.1)),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
                         color: isOutOfStock
-                            ? Colors.grey
-                            : (product.isConsignment ? Colors.amber.shade900 : AppConfig.primaryTeal),
+                            ? Colors.grey.shade300
+                            : (product.isConsignment ? Colors.amber.shade300 : AppConfig.primaryTeal.withValues(alpha: 0.2)),
                       ),
                     ),
+                    child: (product.imagePath != null && product.imagePath!.isNotEmpty && File(product.imagePath!).existsSync())
+                        ? ClipRRect(
+                            borderRadius: BorderRadius.circular(9),
+                            child: Image.file(File(product.imagePath!), fit: BoxFit.cover, width: 44, height: 44),
+                          )
+                        : Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              Text(
+                                product.nama.isNotEmpty ? product.nama[0].toUpperCase() : 'P',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w900,
+                                  color: isOutOfStock
+                                      ? Colors.grey
+                                      : (product.isConsignment ? Colors.amber.shade900 : AppConfig.primaryTeal),
+                                ),
+                              ),
+                              Positioned(
+                                right: 1,
+                                bottom: 1,
+                                child: Container(
+                                  padding: const EdgeInsets.all(1.5),
+                                  decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.5), shape: BoxShape.circle),
+                                  child: const Icon(Icons.add_a_photo, size: 9, color: Colors.white),
+                                ),
+                              ),
+                            ],
+                          ),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -791,9 +937,26 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                             ),
                           ],
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.close),
-                          onPressed: () => Navigator.pop(ctx),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: () => _promptHoldCart(context, pos, ctx),
+                              icon: const Icon(Icons.pause_circle_outline, size: 15, color: Color(0xFFB45309)),
+                              label: const Text('Tahan', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFB45309))),
+                              style: OutlinedButton.styleFrom(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                side: BorderSide(color: Colors.amber.shade400),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                backgroundColor: Colors.amber.shade50,
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            IconButton(
+                              icon: const Icon(Icons.close),
+                              onPressed: () => Navigator.pop(ctx),
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -1775,6 +1938,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
     bool isStockManaged = product?.isStockManaged ?? (product != null ? product.stok >= 0 : true);
     String productType = product?.productType ?? ((product?.penitip != null && product!.penitip!.trim().isNotEmpty) ? 'consignment' : 'shop');
     String commType = product?.commissionType ?? 'markup';
+    String? currentImagePath = product?.imagePath;
 
     showDialog(
       context: context,
@@ -1794,8 +1958,88 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    TextField(controller: kodeCtrl, decoration: const InputDecoration(labelText: 'Kode / SKU Produk')),
-                    TextField(controller: namaCtrl, decoration: const InputDecoration(labelText: 'Nama Produk')),
+                    // Foto Produk Box
+                    Center(
+                      child: Column(
+                        children: [
+                          Container(
+                            width: 100,
+                            height: 100,
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF1F5F9),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: const Color(0xFFCBD5E1)),
+                            ),
+                            child: (currentImagePath != null && currentImagePath!.isNotEmpty && File(currentImagePath!).existsSync())
+                                ? ClipRRect(
+                                    borderRadius: BorderRadius.circular(13),
+                                    child: Image.file(File(currentImagePath!), fit: BoxFit.cover),
+                                  )
+                                : Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(Icons.add_a_photo_outlined, size: 30, color: Colors.grey.shade500),
+                                      const SizedBox(height: 4),
+                                      Text('Foto Produk', style: TextStyle(fontSize: 10, color: Colors.grey.shade600, fontWeight: FontWeight.w600)),
+                                    ],
+                                  ),
+                          ),
+                          const SizedBox(height: 6),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              TextButton.icon(
+                                onPressed: () async {
+                                  final path = await PosImageService.instance.pickAndCompressImage(source: ImageSource.camera);
+                                  if (path != null) {
+                                    setDlgState(() => currentImagePath = path);
+                                  }
+                                },
+                                icon: const Icon(Icons.camera_alt, size: 14),
+                                label: const Text('Kamera', style: TextStyle(fontSize: 11)),
+                                style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                              ),
+                              TextButton.icon(
+                                onPressed: () async {
+                                  final path = await PosImageService.instance.pickAndCompressImage(source: ImageSource.gallery);
+                                  if (path != null) {
+                                    setDlgState(() => currentImagePath = path);
+                                  }
+                                },
+                                icon: const Icon(Icons.photo_library, size: 14),
+                                label: const Text('Galeri', style: TextStyle(fontSize: 11)),
+                                style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                              ),
+                              if (currentImagePath != null)
+                                IconButton(
+                                  onPressed: () => setDlgState(() => currentImagePath = null),
+                                  icon: const Icon(Icons.delete_outline, size: 16, color: Colors.red),
+                                  tooltip: 'Hapus Foto',
+                                ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+
+                    TextField(
+                      controller: kodeCtrl,
+                      decoration: InputDecoration(
+                        labelText: 'Kode / SKU Produk (Opsional)',
+                        hintText: 'Kosongkan untuk generate otomatis',
+                        suffixIcon: IconButton(
+                          icon: const Icon(Icons.auto_awesome, size: 18, color: AppConfig.primaryTeal),
+                          tooltip: 'Generate Kode Otomatis dari Nama',
+                          onPressed: () {
+                            final existing = pos.products.map((p) => p.kode).toSet();
+                            final code = PosProductHelper.generateCodeFromName(namaCtrl.text, existingCodes: existing);
+                            kodeCtrl.text = code;
+                          },
+                        ),
+                      ),
+                    ),
+                    TextField(controller: namaCtrl, decoration: const InputDecoration(labelText: 'Nama Produk *')),
                     const SizedBox(height: 10),
 
                     // Jenis Produk (Toko, Konsinyasi, Jasa)
@@ -1942,11 +2186,21 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                 TextButton(onPressed: () => Navigator.pop(dCtx), child: const Text('Batal')),
                 ElevatedButton(
                   onPressed: () async {
-                    if (kodeCtrl.text.isEmpty || namaCtrl.text.isEmpty) return;
+                    if (namaCtrl.text.trim().isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('⚠️ Nama produk wajib diisi!')),
+                      );
+                      return;
+                    }
+                    String effectiveKode = kodeCtrl.text.trim();
+                    if (effectiveKode.isEmpty) {
+                      final existing = pos.products.map((p) => p.kode).toSet();
+                      effectiveKode = PosProductHelper.generateCodeFromName(namaCtrl.text, existingCodes: existing);
+                    }
                     final parsedStok = isStockManaged ? (int.tryParse(stokCtrl.text) ?? 0) : -1;
                     final newP = PosProduct(
                       id: product?.id,
-                      kode: kodeCtrl.text.trim(),
+                      kode: effectiveKode,
                       nama: namaCtrl.text.trim(),
                       unit: unitCtrl.text.trim().isEmpty ? 'pcs' : unitCtrl.text.trim(),
                       hargaDasar: double.tryParse(dasarCtrl.text) ?? 0.0,
@@ -1959,6 +2213,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                       productType: productType,
                       commissionType: commType,
                       commissionValue: double.tryParse(commValCtrl.text) ?? 0.0,
+                      imagePath: currentImagePath,
                     );
                     await pos.saveProduct(newP);
                     if (dCtx.mounted) Navigator.pop(dCtx);
@@ -2316,6 +2571,11 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                       ],
                     ),
                     const SizedBox(width: 6),
+                    IconButton(
+                      icon: const Icon(Icons.chat_bubble_outline_rounded, size: 19, color: Color(0xFF25D366)),
+                      tooltip: 'Kirim Struk via WhatsApp',
+                      onPressed: () => _showWhatsAppReceiptDialog(context, trx),
+                    ),
                     IconButton(
                       icon: const Icon(Icons.print_outlined, size: 20, color: Color(0xFF475569)),
                       tooltip: 'Cetak Ulang Struk',
@@ -2803,6 +3063,20 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                             ),
                           ),
                         ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: () => _showWhatsAppReceiptDialog(context, currentTrx),
+                            icon: const Icon(Icons.chat_bubble_outline_rounded, size: 18),
+                            label: const Text('Kirim WA'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF25D366),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            ),
+                          ),
+                        ),
                         if (!isCancelled && currentTrx.totalActiveItemsQty > 0) ...[
                           const SizedBox(width: 10),
                           OutlinedButton.icon(
@@ -3071,6 +3345,403 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
           },
         );
       },
+    );
+  }
+
+  // =========================================================================
+  // HELPER METODE: FOTO PRODUK, HOLD CART & STRUK WHATSAPP
+  // =========================================================================
+
+  void _showPhotoSourcePicker(BuildContext context, PosProvider pos, PosProduct product) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (bCtx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Foto Produk: ${product.nama}',
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                'Foto otomatis dikompresi agar hemat memori HP & rendering tetap lancar.',
+                style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+              ),
+              const SizedBox(height: 14),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(color: AppConfig.primaryTeal.withValues(alpha: 0.1), shape: BoxShape.circle),
+                  child: const Icon(Icons.camera_alt, color: AppConfig.primaryTeal),
+                ),
+                title: const Text('Ambil Foto Kamera', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                subtitle: const Text('Foto fisik barang langsung di kasir', style: TextStyle(fontSize: 11)),
+                onTap: () async {
+                  Navigator.pop(bCtx);
+                  final path = await PosImageService.instance.pickAndCompressImage(source: ImageSource.camera);
+                  if (path != null) {
+                    await pos.updateProductPhoto(product, path);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('✅ Foto "${product.nama}" berhasil disimpan!')),
+                      );
+                    }
+                  }
+                },
+              ),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(color: Colors.blue.withValues(alpha: 0.1), shape: BoxShape.circle),
+                  child: const Icon(Icons.photo_library, color: Colors.blue),
+                ),
+                title: const Text('Pilih dari Galeri HP', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                subtitle: const Text('Pilih gambar dari album foto HP Anda', style: TextStyle(fontSize: 11)),
+                onTap: () async {
+                  Navigator.pop(bCtx);
+                  final path = await PosImageService.instance.pickAndCompressImage(source: ImageSource.gallery);
+                  if (path != null) {
+                    await pos.updateProductPhoto(product, path);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('✅ Foto "${product.nama}" berhasil disimpan!')),
+                      );
+                    }
+                  }
+                },
+              ),
+              if (product.imagePath != null && product.imagePath!.isNotEmpty)
+                ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(color: Colors.red.withValues(alpha: 0.1), shape: BoxShape.circle),
+                    child: const Icon(Icons.delete_outline, color: Colors.red),
+                  ),
+                  title: const Text('Hapus Foto Produk', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.red)),
+                  onTap: () async {
+                    Navigator.pop(bCtx);
+                    await pos.updateProductPhoto(product, null);
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text('🗑️ Foto "${product.nama}" telah dihapus.')),
+                      );
+                    }
+                  },
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _promptHoldCart(BuildContext context, PosProvider pos, BuildContext sheetCtx) {
+    final noteCtrl = TextEditingController(text: 'Antrean #${pos.holdCartsCount + 1}');
+    showDialog(
+      context: context,
+      builder: (d) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Tahan Keranjang Belanja', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Keranjang belanja aktif saat ini akan disimpan sementara, sehingga kasir dapat melayani pelanggan berikutnya.',
+              style: TextStyle(fontSize: 11.5, color: Color(0xFF64748B)),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: noteCtrl,
+              autofocus: true,
+              decoration: const InputDecoration(
+                labelText: 'Catatan / Nama Pelanggan',
+                hintText: 'Contoh: Ibu kerudung merah / Meja 2',
+                border: OutlineInputBorder(),
+                contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(d), child: const Text('Batal')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.amber.shade700, foregroundColor: Colors.white),
+            onPressed: () async {
+              Navigator.pop(d);
+              Navigator.pop(sheetCtx);
+              final ok = await pos.holdCurrentCart(note: noteCtrl.text.trim());
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(ok ? '⏸️ Antrean berhasil ditahan. Silakan layani pelanggan berikutnya.' : '⚠️ Gagal menahan antrean.'),
+                    backgroundColor: Colors.amber.shade800,
+                  ),
+                );
+              }
+            },
+            child: const Text('Tahan Sekarang'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showHoldCartsSheet(BuildContext context, PosProvider pos) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (modalCtx, setModalState) {
+            final holdList = pos.holdCarts;
+
+            return Container(
+              height: MediaQuery.of(context).size.height * 0.75,
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+              ),
+              child: Column(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 12),
+                    decoration: const BoxDecoration(border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0)))),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.pause_circle_outline, color: Colors.amber.shade900),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Antrean Ditahan (${holdList.length})',
+                              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Color(0xFF0F172A)),
+                            ),
+                          ],
+                        ),
+                        IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(ctx)),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: holdList.isEmpty
+                        ? Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.check_circle_outline, size: 48, color: Colors.green.shade400),
+                                const SizedBox(height: 8),
+                                const Text('Tidak ada antrean yang ditahan.', style: TextStyle(fontSize: 13, color: Color(0xFF64748B), fontWeight: FontWeight.w600)),
+                              ],
+                            ),
+                          )
+                        : ListView.separated(
+                            padding: const EdgeInsets.all(16),
+                            itemCount: holdList.length,
+                            separatorBuilder: (context, index) => const SizedBox(height: 10),
+                            itemBuilder: (context, idx) {
+                              final item = holdList[idx];
+                              final cartId = item['cart_id'] as String;
+                              final note = item['customer_note'] as String? ?? 'Antrean #${idx + 1}';
+                              final total = (item['total_amount'] as num?)?.toDouble() ?? 0.0;
+                              final holdAt = item['hold_at'] as String? ?? '';
+
+                              return Container(
+                                padding: const EdgeInsets.all(12),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFFF8FAFC),
+                                  borderRadius: BorderRadius.circular(14),
+                                  border: Border.all(color: Colors.amber.shade200),
+                                ),
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      padding: const EdgeInsets.all(8),
+                                      decoration: BoxDecoration(color: Colors.amber.shade100, shape: BoxShape.circle),
+                                      child: Icon(Icons.shopping_bag_outlined, size: 20, color: Colors.amber.shade900),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(note, style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 13)),
+                                          const SizedBox(height: 2),
+                                          Text(
+                                            'Waktu: $holdAt • Total: ${_currencyFormat.format(total)}',
+                                            style: TextStyle(fontSize: 11, color: Colors.grey.shade700, fontWeight: FontWeight.w600),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                    ElevatedButton(
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: AppConfig.primaryTeal,
+                                        foregroundColor: Colors.white,
+                                        visualDensity: VisualDensity.compact,
+                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                      ),
+                                      onPressed: () async {
+                                        if (pos.cart.isNotEmpty) {
+                                          final overwrite = await showDialog<bool>(
+                                            context: context,
+                                            builder: (d) => AlertDialog(
+                                              title: const Text('Keranjang Aktif Terisi'),
+                                              content: const Text('Keranjang kasir saat ini masih berisi barang. Apakah Anda ingin menahan transaksi saat ini lalu memulihkan antrean yang dipilih?'),
+                                              actions: [
+                                                TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Batal')),
+                                                ElevatedButton(
+                                                  onPressed: () => Navigator.pop(d, true),
+                                                  child: const Text('Tahan Aktif & Pulihkan Ini'),
+                                                ),
+                                              ],
+                                            ),
+                                          );
+                                          if (overwrite != true) return;
+                                          await pos.holdCurrentCart(note: 'Otomatis Ditahan #${DateTime.now().minute}');
+                                        }
+
+                                        final ok = await pos.restoreHoldCart(cartId);
+                                        if (ctx.mounted) Navigator.pop(ctx);
+                                        if (context.mounted) {
+                                          ScaffoldMessenger.of(context).showSnackBar(
+                                            SnackBar(content: Text(ok ? '✅ Antrean "$note" berhasil dipulihkan!' : '⚠️ Gagal memulihkan antrean.')),
+                                          );
+                                        }
+                                      },
+                                      child: const Text('Pulihkan', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    IconButton(
+                                      icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                                      tooltip: 'Hapus Antrean',
+                                      onPressed: () async {
+                                        final confirm = await showDialog<bool>(
+                                          context: context,
+                                          builder: (d) => AlertDialog(
+                                            title: const Text('Hapus Antrean?'),
+                                            content: Text('Hapus antrean "$note"?'),
+                                            actions: [
+                                              TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Batal')),
+                                              TextButton(onPressed: () => Navigator.pop(d, true), child: const Text('Hapus', style: TextStyle(color: Colors.red))),
+                                            ],
+                                          ),
+                                        );
+                                        if (confirm == true) {
+                                          await pos.deleteHoldCart(cartId);
+                                          setModalState(() {});
+                                        }
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showWhatsAppReceiptDialog(BuildContext context, PosTransaction trx) {
+    final phoneCtrl = TextEditingController();
+    final receiptPreview = PosWhatsappService.instance.generateReceiptText(trx: trx);
+
+    showDialog(
+      context: context,
+      builder: (d) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: const BoxDecoration(color: Color(0xFF25D366), shape: BoxShape.circle),
+              child: const Icon(Icons.chat_bubble_outline, size: 16, color: Colors.white),
+            ),
+            const SizedBox(width: 8),
+            const Text('Kirim Struk via WhatsApp', style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900)),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Masukkan nomor WhatsApp pembeli (opsional) atau langsung bagikan struk:',
+                style: TextStyle(fontSize: 11.5, color: Color(0xFF64748B)),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: phoneCtrl,
+                keyboardType: TextInputType.phone,
+                decoration: const InputDecoration(
+                  labelText: 'Nomor WhatsApp Pembeli',
+                  hintText: '0812xxxxxxx atau 62812xxxxxxx',
+                  prefixIcon: Icon(Icons.phone_android, size: 20),
+                  border: OutlineInputBorder(),
+                  contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text('Pratinjau Format Struk:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF8FAFC),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                constraints: const BoxConstraints(maxHeight: 180),
+                child: SingleChildScrollView(
+                  child: Text(
+                    receiptPreview,
+                    style: const TextStyle(fontFamily: 'monospace', fontSize: 10.5, color: Color(0xFF1E293B)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(d), child: const Text('Batal')),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF25D366), foregroundColor: Colors.white),
+            onPressed: () async {
+              Navigator.pop(d);
+              final ok = await PosWhatsappService.instance.sendReceiptViaWhatsApp(
+                trx: trx,
+                customerPhone: phoneCtrl.text.trim(),
+              );
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(ok ? '✅ Struk nota dikirim ke WhatsApp!' : '⚠️ Gagal membuka WhatsApp.'),
+                    backgroundColor: const Color(0xFF25D366),
+                  ),
+                );
+              }
+            },
+            icon: const Icon(Icons.send_rounded, size: 16),
+            label: const Text('Kirim WhatsApp'),
+          ),
+        ],
+      ),
     );
   }
 }

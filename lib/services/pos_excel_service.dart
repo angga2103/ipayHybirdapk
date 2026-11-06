@@ -6,6 +6,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../models/pos_product.dart';
 import 'pos_database_service.dart';
+import 'pos_product_helper.dart';
 
 class PosExcelService {
   PosExcelService._internal();
@@ -162,16 +163,21 @@ class PosExcelService {
     if (idxKategori == -1) idxKategori = 7;
     if (idxPenitip == -1 && headerRow.length > 8) idxPenitip = 8;
 
+    final Set<String> existingCodes = {};
+
     for (int r = 1; r < rows.length; r++) {
       final row = rows[r];
       if (row.isEmpty) continue;
 
-      final kode = _getCellValue(row, idxKode);
-      final nama = _getCellValue(row, idxNama);
+      final kode = _getCellValue(row, idxKode).trim();
+      final nama = _getCellValue(row, idxNama).trim();
       if (kode.isEmpty && nama.isEmpty) continue;
 
-      final safeKode = kode.isNotEmpty ? kode : 'PRD-${dateNowMs()}-$r';
-      final safeNama = nama.isNotEmpty ? nama : 'Produk $safeKode';
+      final safeNama = nama.isNotEmpty ? nama : 'Produk Baris $r';
+      final safeKode = kode.isNotEmpty
+          ? kode
+          : PosProductHelper.generateCodeFromName(safeNama, existingCodes: existingCodes);
+      existingCodes.add(safeKode);
       final unit = _getCellValue(row, idxUnit).isNotEmpty ? _getCellValue(row, idxUnit) : 'pcs';
       final dasar = _cellToDouble(_getCell(row, idxDasar));
       final jual = _cellToDouble(_getCell(row, idxJual));

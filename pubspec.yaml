@@ -2,7 +2,7 @@ name: mobile_flutter
 description: "A new Flutter project."
 publish_to: 'none'
 
-version: 2.1.1+11
+version: 2.1.2+12
 
 environment:
   sdk: ^3.13.4
@@ -35,6 +35,8 @@ dependencies:
   file_picker: ^8.1.4
   share_plus: ^10.1.2
   intl: ^0.19.0
+  image_picker: ^1.2.4
+  mobile_scanner: ^7.5.0
 
 dependency_overrides:
   shared_preferences_android: 2.3.4

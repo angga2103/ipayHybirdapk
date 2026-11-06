@@ -7,6 +7,8 @@ import 'package:mobile_flutter/models/pos_product.dart';
 import 'package:mobile_flutter/models/pos_transaction.dart';
 import 'package:mobile_flutter/providers/printer_provider.dart';
 import 'package:mobile_flutter/services/pos_excel_service.dart';
+import 'package:mobile_flutter/services/pos_product_helper.dart';
+import 'package:mobile_flutter/services/pos_whatsapp_service.dart';
 import 'package:mobile_flutter/services/printer_service.dart';
 import 'package:mobile_flutter/services/storage_service.dart';
 
@@ -276,6 +278,132 @@ void main() {
       expect(trx.totalActiveItemsQty, equals(2));
       expect(trx.totalReturnedQty, equals(2));
       expect(trx.totalRefundedAmount, equals(7000));
+    });
+  });
+
+  group('PosProductHelper Auto-Generate Code Tests', () {
+    test('Generates valid code with formula 3-5 uppercase letters + hyphen + 4 random digits', () {
+      final code1 = PosProductHelper.generateCodeFromName('Kopi Susu Gula Aren');
+      final codePattern = RegExp(r'^[A-Z]{3,5}-\d{4}$');
+      expect(codePattern.hasMatch(code1), isTrue);
+      expect(code1.startsWith('KSGA-'), isTrue);
+
+      final code2 = PosProductHelper.generateCodeFromName('Air Galon Isi Ulang');
+      expect(codePattern.hasMatch(code2), isTrue);
+      expect(code2.startsWith('AGIU-'), isTrue);
+    });
+
+    test('Handles single-word product names properly', () {
+      final code = PosProductHelper.generateCodeFromName('Beras');
+      final codePattern = RegExp(r'^[A-Z]{3,5}-\d{4}$');
+      expect(codePattern.hasMatch(code), isTrue);
+      expect(code.startsWith('BERAS-'), isTrue);
+    });
+
+    test('Handles short or special character names properly', () {
+      final codeShort = PosProductHelper.generateCodeFromName('Es');
+      expect(codeShort, isNotEmpty);
+      expect(codeShort.contains('-'), isTrue);
+
+      final codeSpecial = PosProductHelper.generateCodeFromName('Kue Cubit (Pandan) #1');
+      final codePattern = RegExp(r'^[A-Z]{3,5}-\d{4}$');
+      expect(codePattern.hasMatch(codeSpecial), isTrue);
+    });
+
+    test('Avoids collision when generated code already exists', () {
+      final existing = <String>{};
+      for (int i = 0; i < 20; i++) {
+        final code = PosProductHelper.generateCodeFromName('Kopi Susu Aren', existingCodes: existing);
+        expect(existing.contains(code), isFalse);
+        existing.add(code);
+      }
+      expect(existing.length, equals(20));
+    });
+  });
+
+  group('PosProduct with Offline Image Path Tests', () {
+    test('Serializes and deserializes imagePath correctly', () {
+      final product = PosProduct(
+        id: 101,
+        kode: 'KSA-1234',
+        nama: 'Kopi Susu Aren',
+        unit: 'cup',
+        hargaDasar: 8000,
+        hargaJual: 15000,
+        stok: 50,
+        kategori: 'Minuman',
+        imagePath: '/data/user/0/com.garudatel.ipay/app_flutter/product_images/prod_1234.jpg',
+      );
+
+      final map = product.toMap();
+      expect(map['image_path'], equals('/data/user/0/com.garudatel.ipay/app_flutter/product_images/prod_1234.jpg'));
+
+      final fromMapProduct = PosProduct.fromMap(map);
+      expect(fromMapProduct.imagePath, equals(product.imagePath));
+      expect(fromMapProduct.nama, equals(product.nama));
+
+      final updated = product.copyWith(imagePath: '/new/path.jpg');
+      expect(updated.imagePath, equals('/new/path.jpg'));
+      expect(updated.kode, equals(product.kode));
+    });
+  });
+
+  group('PosWhatsappService Receipt Formatting Tests', () {
+    test('Generates clean, elegant digital receipt for customer', () {
+      final item1 = PosTransactionItem(
+        productKode: 'AGIU-1001',
+        productName: 'Air Galon Isi Ulang',
+        unit: 'galon',
+        qty: 2,
+        normalPrice: 6700,
+        soldPrice: 6700,
+        subtotal: 13400,
+        costPrice: 4000,
+        profit: 5400,
+      );
+
+      final item2 = PosTransactionItem(
+        productKode: 'AC-1002',
+        productName: 'Adaptor Charger 2A',
+        unit: 'pcs',
+        qty: 1,
+        normalPrice: 25000,
+        soldPrice: 45000, // Harga diubah kasir naik
+        subtotal: 45000,
+        costPrice: 18000,
+        profit: 27000,
+      );
+
+      final trx = PosTransaction(
+        invoiceNo: 'POS-20261106-99001',
+        dateTime: DateTime(2026, 11, 6, 14, 30),
+        totalAmount: 58400,
+        normalAmount: 38400,
+        discountAmount: 0,
+        profitAmount: 32400,
+        cashPaid: 60000,
+        changeDue: 1600,
+        paymentMethod: 'Tunai',
+        cashierName: 'Budi Kasir',
+        status: 'PAID',
+        items: [item1, item2],
+      );
+
+      final receipt = PosWhatsappService.instance.generateReceiptText(
+        trx: trx,
+        storeName: 'TOKO IPAY SENTOSA',
+      );
+
+      expect(receipt.contains('STRUK PEMBELIAN - TOKO IPAY SENTOSA'), isTrue);
+      expect(receipt.contains('POS-20261106-99001'), isTrue);
+      expect(receipt.contains('Kasir    : Budi Kasir'), isTrue);
+      expect(receipt.contains('2x Air Galon Isi Ulang'), isTrue);
+      expect(receipt.contains('1x Adaptor Charger 2A'), isTrue);
+      expect(receipt.contains('TOTAL     : Rp 58.400'), isTrue);
+      expect(receipt.contains('Kembalian : Rp 1.600'), isTrue);
+      // Memastikan TIDAK ADA teks internal audit seperti 'Diskon Khusus' atau 'Harga Normal' pada struk pembeli
+      expect(receipt.contains('Diskon Khusus'), isFalse);
+      expect(receipt.contains('Bawah Modal'), isFalse);
     });
   });
 }

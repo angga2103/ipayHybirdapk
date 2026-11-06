@@ -60,7 +60,7 @@ class PosDatabaseService {
 
     return await openDatabase(
       path,
-      version: 3,
+      version: 4,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -82,6 +82,7 @@ class PosDatabaseService {
             product_type TEXT NOT NULL DEFAULT 'shop',
             commission_type TEXT NOT NULL DEFAULT 'markup',
             commission_value REAL NOT NULL DEFAULT 0,
+            image_path TEXT,
             is_archived INTEGER NOT NULL DEFAULT 0,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
@@ -187,6 +188,19 @@ class PosDatabaseService {
         ''');
         await db.execute('CREATE INDEX idx_closing_date ON pos_daily_closings(closing_date);');
 
+        // 7. Tabel Antrean / Keranjang Belanja Tertahan (Hold Carts)
+        await db.execute('''
+          CREATE TABLE pos_hold_carts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cart_id TEXT UNIQUE NOT NULL,
+            customer_note TEXT,
+            hold_at TEXT NOT NULL,
+            total_amount REAL NOT NULL DEFAULT 0,
+            items_json TEXT NOT NULL
+          );
+        ''');
+        await db.execute('CREATE INDEX idx_hold_carts_id ON pos_hold_carts(cart_id);');
+
         // Seeding Awal Default Produk
         await _seedDefaultProducts(db);
       },
@@ -256,6 +270,26 @@ class PosDatabaseService {
             ''');
             await db.execute('CREATE INDEX IF NOT EXISTS idx_returns_trx ON pos_transaction_returns(transaction_id);');
             await db.execute('CREATE INDEX IF NOT EXISTS idx_returns_invoice ON pos_transaction_returns(invoice_no);');
+          } catch (_) {}
+        }
+
+        if (oldVersion < 4) {
+          // Migrasi Skema v3 -> v4 (Foto Produk & Hold Carts)
+          try {
+            await db.execute('ALTER TABLE pos_products ADD COLUMN image_path TEXT;');
+          } catch (_) {}
+          try {
+            await db.execute('''
+              CREATE TABLE IF NOT EXISTS pos_hold_carts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cart_id TEXT UNIQUE NOT NULL,
+                customer_note TEXT,
+                hold_at TEXT NOT NULL,
+                total_amount REAL NOT NULL DEFAULT 0,
+                items_json TEXT NOT NULL
+              );
+            ''');
+            await db.execute('CREATE INDEX IF NOT EXISTS idx_hold_carts_id ON pos_hold_carts(cart_id);');
           } catch (_) {}
         }
       },
@@ -1048,5 +1082,57 @@ class PosDatabaseService {
       limit: limit,
     );
     return maps.map((m) => PosDailyClosing.fromMap(m)).toList();
+  }
+
+  // ==========================================
+  // ANTREAN / KERANJANG TERTAHAN (HOLD CARTS)
+  // ==========================================
+
+  Future<int> saveHoldCart({
+    required String cartId,
+    String? customerNote,
+    required double totalAmount,
+    required String itemsJson,
+  }) async {
+    final db = await database;
+    return await db.insert(
+      'pos_hold_carts',
+      {
+        'cart_id': cartId,
+        'customer_note': customerNote,
+        'hold_at': DateTime.now().toIso8601String(),
+        'total_amount': totalAmount,
+        'items_json': itemsJson,
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> getAllHoldCarts() async {
+    final db = await database;
+    return await db.query('pos_hold_carts', orderBy: 'hold_at DESC');
+  }
+
+  Future<int> deleteHoldCart(String cartId) async {
+    final db = await database;
+    return await db.delete('pos_hold_carts', where: 'cart_id = ?', whereArgs: [cartId]);
+  }
+
+  Future<int> getHoldCartsCount() async {
+    final db = await database;
+    return Sqflite.firstIntValue(await db.rawQuery('SELECT COUNT(*) FROM pos_hold_carts')) ?? 0;
+  }
+
+  /// Mengecek apakah kode produk sudah terpakai di database
+  Future<bool> isProductCodeExists(String kode) async {
+    final db = await database;
+    final res = await db.query(
+      'pos_products',
+      columns: ['id'],
+      where: 'LOWER(kode) = ?',
+      whereArgs: [kode.trim().toLowerCase()],
+      limit: 1,
+    );
+    return res.isNotEmpty;
   }
 }

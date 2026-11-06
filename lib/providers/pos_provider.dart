@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import '../models/pos_cart_item.dart';
 import '../models/pos_product.dart';
@@ -5,6 +6,8 @@ import '../models/pos_transaction.dart';
 import '../services/pos_backup_service.dart';
 import '../services/pos_database_service.dart';
 import '../services/pos_excel_service.dart';
+import '../services/pos_image_service.dart';
+import '../services/pos_product_helper.dart';
 import '../services/printer_service.dart';
 
 class PosProvider extends ChangeNotifier {
@@ -15,6 +18,7 @@ class PosProvider extends ChangeNotifier {
   final List<PosCartItem> _cart = [];
   List<ConsignmentSummary> _consignments = [];
   List<PosTransaction> _transactions = [];
+  List<Map<String, dynamic>> _holdCarts = [];
   Map<String, double> _todayStats = {
     'total_omset': 0.0,
     'total_profit': 0.0,
@@ -37,6 +41,8 @@ class PosProvider extends ChangeNotifier {
   List<PosCartItem> get cart => List.unmodifiable(_cart);
   List<ConsignmentSummary> get consignments => _consignments;
   List<PosTransaction> get transactions => _transactions;
+  List<Map<String, dynamic>> get holdCarts => _holdCarts;
+  int get holdCartsCount => _holdCarts.length;
   Map<String, double> get todayStats => _todayStats;
   bool get isLoading => _isLoading;
   String? get errorMessage => _errorMessage;
@@ -113,6 +119,7 @@ class PosProvider extends ChangeNotifier {
     _categories = await PosDatabaseService.instance.getAllCategories();
     _consignments = await PosDatabaseService.instance.getConsignmentSummaries();
     _transactions = await PosDatabaseService.instance.getAllTransactions(limit: 50);
+    _holdCarts = await PosDatabaseService.instance.getAllHoldCarts();
     _todayStats = await PosDatabaseService.instance.getTodaySalesStats();
     notifyListeners();
   }
@@ -255,11 +262,136 @@ class PosProvider extends ChangeNotifier {
   // --- Product Management ---
   Future<bool> saveProduct(PosProduct product) async {
     try {
+      // Jika kode produk kosong, buatkan otomatis menggunakan rumus
+      if (product.kode.trim().isEmpty) {
+        final existingCodes = _products.map((p) => p.kode).toSet();
+        final autoCode = PosProductHelper.generateCodeFromName(product.nama, existingCodes: existingCodes);
+        product = product.copyWith(kode: autoCode);
+      }
       await PosDatabaseService.instance.insertOrUpdateProduct(product);
       await refreshAll();
       return true;
     } catch (e) {
       _errorMessage = 'Gagal menyimpan produk: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  /// Memperbarui atau menambahkan foto pada produk yang sudah tersimpan
+  Future<bool> updateProductPhoto(PosProduct product, String? newImagePath) async {
+    try {
+      if (product.imagePath != null && product.imagePath != newImagePath) {
+        await PosImageService.instance.deleteImageFile(product.imagePath);
+      }
+      final updated = product.copyWith(imagePath: newImagePath);
+      await PosDatabaseService.instance.insertOrUpdateProduct(updated);
+      await refreshAll();
+      return true;
+    } catch (e) {
+      _errorMessage = 'Gagal memperbarui foto produk: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  // --- Barcode Scanner Helper ---
+  PosProduct? findProductByBarcode(String barcode) {
+    final clean = barcode.trim().toLowerCase();
+    try {
+      return _products.firstWhere(
+        (p) => !p.isArchived && p.kode.trim().toLowerCase() == clean,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  bool addProductByBarcode(String barcode) {
+    final product = findProductByBarcode(barcode);
+    if (product != null) {
+      return addToCart(product);
+    }
+    _errorMessage = 'Produk dengan kode/barcode "$barcode" tidak ditemukan!';
+    notifyListeners();
+    return false;
+  }
+
+  // --- Hold Cart Operations (Tahan & Pulihkan Keranjang) ---
+  Future<bool> holdCurrentCart({String? note}) async {
+    if (_cart.isEmpty) return false;
+    try {
+      final cartId = 'HOLD-${DateTime.now().millisecondsSinceEpoch}';
+      final itemsList = _cart.map((it) => {
+        'product': it.product.toMap(),
+        'qty': it.qty,
+        'custom_price': it.actualPrice,
+      }).toList();
+      final itemsJson = jsonEncode(itemsList);
+      final total = cartTotal;
+
+      await PosDatabaseService.instance.saveHoldCart(
+        cartId: cartId,
+        customerNote: note ?? 'Pelanggan #${_holdCarts.length + 1}',
+        totalAmount: total,
+        itemsJson: itemsJson,
+      );
+
+      _cart.clear();
+      _holdCarts = await PosDatabaseService.instance.getAllHoldCarts();
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _errorMessage = 'Gagal menahan pesanan: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> restoreHoldCart(String cartId) async {
+    try {
+      final cartRecord = _holdCarts.firstWhere((c) => c['cart_id'] == cartId, orElse: () => {});
+      if (cartRecord.isEmpty) return false;
+
+      final itemsJson = cartRecord['items_json'] as String?;
+      if (itemsJson == null || itemsJson.isEmpty) return false;
+
+      final decoded = jsonDecode(itemsJson) as List<dynamic>;
+      _cart.clear();
+
+      for (final raw in decoded) {
+        final pMap = raw['product'] as Map<String, dynamic>;
+        final currentProduct = _products.firstWhere(
+          (p) => p.kode == pMap['kode'],
+          orElse: () => PosProduct.fromMap(pMap),
+        );
+        final item = PosCartItem(
+          product: currentProduct,
+          qty: (raw['qty'] as num?)?.toInt() ?? 1,
+          customPrice: (raw['custom_price'] as num?)?.toDouble() ?? currentProduct.hargaJual,
+        );
+        _cart.add(item);
+      }
+
+      await PosDatabaseService.instance.deleteHoldCart(cartId);
+      _holdCarts = await PosDatabaseService.instance.getAllHoldCarts();
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _errorMessage = 'Gagal memuat pesanan tertahan: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> deleteHoldCart(String cartId) async {
+    try {
+      await PosDatabaseService.instance.deleteHoldCart(cartId);
+      _holdCarts = await PosDatabaseService.instance.getAllHoldCarts();
+      notifyListeners();
+      return true;
+    } catch (e) {
+      _errorMessage = 'Gagal menghapus pesanan tertahan: $e';
       notifyListeners();
       return false;
     }
