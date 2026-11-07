@@ -6,16 +6,32 @@ import '../../providers/pos_provider.dart';
 
 /// Modal Scanner Barcode Kamera Cepat untuk Kasir POS
 class PosScannerModal extends StatefulWidget {
-  final PosProvider pos;
+  final PosProvider? pos;
+  final bool isSingleCapture;
 
-  const PosScannerModal({super.key, required this.pos});
+  const PosScannerModal({
+    super.key,
+    this.pos,
+    this.isSingleCapture = false,
+  });
 
+  /// Mode 1: Pemindaian keranjang kasir (tambah ke keranjang berulang kali)
   static Future<void> show(BuildContext context, PosProvider pos) {
     return showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => PosScannerModal(pos: pos),
+      builder: (_) => PosScannerModal(pos: pos, isSingleCapture: false),
+    );
+  }
+
+  /// Mode 2: Pemindaian tunggal untuk input form kode/SKU barang
+  static Future<String?> scanSingle(BuildContext context) {
+    return showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => const PosScannerModal(isSingleCapture: true),
     );
   }
 
@@ -54,7 +70,14 @@ class _PosScannerModalState extends State<PosScannerModal> {
     if (rawVal == null || rawVal.trim().isEmpty) return;
     final code = rawVal.trim();
 
-    // Debounce agar tidak scan berulang kali dalam 1.2 detik untuk barcode yang sama
+    // Jika mode scan single (input form), langsung kembalikan kode barcode
+    if (widget.isSingleCapture) {
+      HapticFeedback.mediumImpact();
+      Navigator.pop(context, code);
+      return;
+    }
+
+    // Mode checkout kasir: Debounce agar tidak scan berulang kali dalam 1.2 detik
     final now = DateTime.now();
     if (_lastScannedCode == code && now.difference(_lastScanTime).inMilliseconds < 1200) {
       return;
@@ -64,25 +87,29 @@ class _PosScannerModalState extends State<PosScannerModal> {
 
     HapticFeedback.mediumImpact();
 
-    final product = widget.pos.findProductByBarcode(code);
-    if (product != null) {
-      final ok = widget.pos.addToCart(product);
-      setState(() {
-        _isSuccessBanner = ok;
-        _statusBanner = ok
-            ? '✅ ${product.nama} masuk keranjang'
-            : widget.pos.errorMessage ?? '⚠️ Gagal menambah stok';
-      });
-    } else {
-      setState(() {
-        _isSuccessBanner = false;
-        _statusBanner = '❌ Barcode "$code" belum terdaftar';
-      });
+    if (widget.pos != null) {
+      final product = widget.pos!.findProductByBarcode(code);
+      if (product != null) {
+        final ok = widget.pos!.addToCart(product);
+        setState(() {
+          _isSuccessBanner = ok;
+          _statusBanner = ok
+              ? '✅ ${product.nama} masuk keranjang'
+              : widget.pos!.errorMessage ?? '⚠️ Gagal menambah stok';
+        });
+      } else {
+        setState(() {
+          _isSuccessBanner = false;
+          _statusBanner = '❌ Barcode "$code" belum terdaftar';
+        });
+      }
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final isSingle = widget.isSingleCapture;
+
     return Container(
       height: MediaQuery.of(context).size.height * 0.85,
       decoration: const BoxDecoration(
@@ -98,17 +125,19 @@ class _PosScannerModalState extends State<PosScannerModal> {
               children: [
                 const Icon(Icons.qr_code_scanner_rounded, color: AppConfig.primaryTeal, size: 24),
                 const SizedBox(width: 10),
-                const Expanded(
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Pindai Barcode Produk',
-                        style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                        isSingle ? 'Pindai Barcode Kemasan' : 'Pindai Barcode Produk',
+                        style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
                       ),
                       Text(
-                        'Arahkan kamera ke barcode kemasan barang',
-                        style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                        isSingle
+                            ? 'Arahkan kamera ke barcode kemasan untuk input otomatis'
+                            : 'Arahkan kamera ke barcode kemasan barang',
+                        style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
                       ),
                     ],
                   ),
@@ -175,7 +204,7 @@ class _PosScannerModalState extends State<PosScannerModal> {
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: const Text(
-                      'Mendukung Barcode EAN-13, QR Code & Kode Produk',
+                      'Mendukung Barcode EAN-13, Code 128 & QR Code',
                       style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.w600),
                     ),
                   ),
@@ -184,8 +213,8 @@ class _PosScannerModalState extends State<PosScannerModal> {
             ),
           ),
 
-          // Status Feedback Banner
-          if (_statusBanner != null)
+          // Status Feedback Banner (Hanya muncul di mode keranjang checkout)
+          if (!isSingle && _statusBanner != null)
             AnimatedContainer(
               duration: const Duration(milliseconds: 200),
               width: double.infinity,
@@ -209,36 +238,61 @@ class _PosScannerModalState extends State<PosScannerModal> {
               ),
             ),
 
-          // Footer Info Kasir
-          Container(
-            padding: const EdgeInsets.all(16),
-            color: const Color(0xFF1E293B),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text('Keranjang Aktif:', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
-                    Text(
-                      '${widget.pos.cartTotalQty} Item • Rp ${widget.pos.cartTotal.toInt()}',
-                      style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
-                    ),
-                  ],
-                ),
-                ElevatedButton.icon(
-                  onPressed: () => Navigator.pop(context),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppConfig.primaryTeal,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          // Footer Info
+          if (!isSingle && widget.pos != null)
+            Container(
+              padding: const EdgeInsets.all(16),
+              color: const Color(0xFF1E293B),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Keranjang Aktif:', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11)),
+                      Text(
+                        '${widget.pos!.cartTotalQty} Item • Rp ${widget.pos!.cartTotal.toInt()}',
+                        style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                      ),
+                    ],
                   ),
-                  icon: const Icon(Icons.shopping_cart_checkout_rounded, size: 18),
-                  label: const Text('Selesai Scan', style: TextStyle(fontWeight: FontWeight.bold)),
-                ),
-              ],
+                  ElevatedButton.icon(
+                    onPressed: () => Navigator.pop(context),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppConfig.primaryTeal,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    icon: const Icon(Icons.shopping_cart_checkout_rounded, size: 18),
+                    label: const Text('Selesai Scan', style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ),
+            )
+          else
+            Container(
+              padding: const EdgeInsets.all(16),
+              color: const Color(0xFF1E293B),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Posisikan barcode dalam kotak hijau',
+                    style: TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                  ),
+                  ElevatedButton.icon(
+                    onPressed: () => Navigator.pop(context),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.grey.shade700,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                    icon: const Icon(Icons.close, size: 16),
+                    label: const Text('Batal', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                  ),
+                ],
+              ),
             ),
-          ),
         ],
       ),
     );

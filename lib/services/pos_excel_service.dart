@@ -176,7 +176,7 @@ class PosExcelService {
       final safeNama = nama.isNotEmpty ? nama : 'Produk Baris $r';
       final safeKode = kode.isNotEmpty
           ? kode
-          : PosProductHelper.generateCodeFromName(safeNama, existingCodes: existingCodes);
+          : PosProductHelper.generateNumericCode(existingCodes: existingCodes);
       existingCodes.add(safeKode);
       final unit = _getCellValue(row, idxUnit).isNotEmpty ? _getCellValue(row, idxUnit) : 'pcs';
       final dasar = _cellToDouble(_getCell(row, idxDasar));

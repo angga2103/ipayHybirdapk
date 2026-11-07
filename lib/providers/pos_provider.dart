@@ -265,7 +265,7 @@ class PosProvider extends ChangeNotifier {
       // Jika kode produk kosong, buatkan otomatis menggunakan rumus
       if (product.kode.trim().isEmpty) {
         final existingCodes = _products.map((p) => p.kode).toSet();
-        final autoCode = PosProductHelper.generateCodeFromName(product.nama, existingCodes: existingCodes);
+        final autoCode = PosProductHelper.generateNumericCode(existingCodes: existingCodes);
         product = product.copyWith(kode: autoCode);
       }
       await PosDatabaseService.instance.insertOrUpdateProduct(product);

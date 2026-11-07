@@ -2033,15 +2033,30 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                       controller: kodeCtrl,
                       decoration: InputDecoration(
                         labelText: 'Kode / SKU Produk (Opsional)',
-                        hintText: 'Kosongkan untuk generate otomatis',
-                        suffixIcon: IconButton(
-                          icon: const Icon(Icons.auto_awesome, size: 18, color: AppConfig.primaryTeal),
-                          tooltip: 'Generate Kode Otomatis dari Nama',
-                          onPressed: () {
-                            final existing = pos.products.map((p) => p.kode).toSet();
-                            final code = PosProductHelper.generateCodeFromName(namaCtrl.text, existingCodes: existing);
-                            kodeCtrl.text = code;
-                          },
+                        hintText: 'Scan kemasan / generate otomatis',
+                        suffixIcon: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.qr_code_scanner_rounded, size: 20, color: AppConfig.primaryTeal),
+                              tooltip: 'Scan Barcode Kemasan Barang',
+                              onPressed: () async {
+                                final scanned = await PosScannerModal.scanSingle(context);
+                                if (scanned != null && scanned.isNotEmpty) {
+                                  kodeCtrl.text = scanned;
+                                }
+                              },
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.auto_awesome, size: 18, color: Colors.orange),
+                              tooltip: 'Generate Kode Angka Anti-Bentrok',
+                              onPressed: () {
+                                final existing = pos.products.map((p) => p.kode).toSet();
+                                final code = PosProductHelper.generateNumericCode(existingCodes: existing);
+                                kodeCtrl.text = code;
+                              },
+                            ),
+                          ],
                         ),
                       ),
                     ),
@@ -2201,7 +2216,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                     String effectiveKode = kodeCtrl.text.trim();
                     if (effectiveKode.isEmpty) {
                       final existing = pos.products.map((p) => p.kode).toSet();
-                      effectiveKode = PosProductHelper.generateCodeFromName(namaCtrl.text, existingCodes: existing);
+                      effectiveKode = PosProductHelper.generateNumericCode(existingCodes: existing);
                     }
                     final parsedStok = isStockManaged ? (int.tryParse(stokCtrl.text) ?? 0) : -1;
                     final newP = PosProduct(

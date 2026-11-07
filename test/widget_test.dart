@@ -319,6 +319,25 @@ void main() {
       }
       expect(existing.length, equals(20));
     });
+
+    test('Generates GS1 In-Store numeric code with prefix 20 and exactly 10 digits', () {
+      final code = PosProductHelper.generateNumericCode();
+      expect(code.length, equals(10));
+      expect(code.startsWith('20'), isTrue);
+      final numericPattern = RegExp(r'^20\d{8}$');
+      expect(numericPattern.hasMatch(code), isTrue);
+    });
+
+    test('Numeric code generator avoids collisions', () {
+      final existing = <String>{};
+      for (int i = 0; i < 20; i++) {
+        final code = PosProductHelper.generateNumericCode(existingCodes: existing);
+        expect(existing.contains(code), isFalse);
+        expect(code.startsWith('20'), isTrue);
+        existing.add(code);
+      }
+      expect(existing.length, equals(20));
+    });
   });
 
   group('PosProduct with Offline Image Path Tests', () {
