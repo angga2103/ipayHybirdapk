@@ -428,6 +428,41 @@ void main() {
       expect(receipt.contains('Diskon Khusus'), isFalse);
       expect(receipt.contains('Bawah Modal'), isFalse);
     });
+
+    test('Generates detailed shift closing report text for WhatsApp', () {
+      final shift = PosShift(
+        cashierName: 'Ahmad Kasir',
+        openedAt: DateTime(2026, 11, 8, 8, 0),
+        closedAt: DateTime(2026, 11, 8, 16, 0),
+        startingCash: 100000,
+        totalCashSales: 450000,
+        totalQrisSales: 200000,
+        totalDebtSales: 50000,
+        totalCashIn: 25000,
+        totalCashOut: 15000,
+        expectedCash: 560000,
+        actualCash: 560000,
+        cashDifference: 0,
+        totalTransactions: 18,
+        status: 'CLOSED',
+        notes: 'Semua lancar aman',
+      );
+
+      final report = PosWhatsappService.instance.generateShiftReportText(
+        shift: shift,
+        storeName: 'IPAY STORE',
+      );
+
+      expect(report.contains('LAPORAN REKAP TUTUP KASIR (SHIFT)'), isTrue);
+      expect(report.contains('IPAY STORE'), isTrue);
+      expect(report.contains('Ahmad Kasir'), isTrue);
+      expect(report.contains('Rp 100.000'), isTrue);
+      expect(report.contains('Rp 450.000'), isTrue);
+      expect(report.contains('Rp 200.000'), isTrue);
+      expect(report.contains('Rp 560.000'), isTrue);
+      expect(report.contains('PAS (SESUAI)'), isTrue);
+      expect(report.contains('Semua lancar aman'), isTrue);
+    });
   });
 
   group('PosShift & Cashier Shift Tests', () {

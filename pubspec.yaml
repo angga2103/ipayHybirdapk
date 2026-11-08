@@ -2,7 +2,7 @@ name: mobile_flutter
 description: "A new Flutter project."
 publish_to: 'none'
 
-version: 2.2.1+16
+version: 2.2.2+17
 
 environment:
   sdk: ^3.13.4

@@ -642,6 +642,20 @@ class PosProvider extends ChangeNotifier {
   }
 
   // --- Shift Kasir (Buka / Tutup Toko) ---
+  Future<PosShift?> refreshActiveShift() async {
+    try {
+      _activeShift = await PosDatabaseService.instance.getActiveShift();
+      if (_activeShift != null) {
+        _activeCashFlows = await PosDatabaseService.instance.getCashFlows(shiftId: _activeShift!.id);
+      }
+      notifyListeners();
+      return _activeShift;
+    } catch (e) {
+      debugPrint('[PosProvider] Error refreshActiveShift: $e');
+      return _activeShift;
+    }
+  }
+
   Future<PosShift?> openShift({required double startingCash, String? notes}) async {
     try {
       final shift = await PosDatabaseService.instance.openShift(

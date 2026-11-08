@@ -791,6 +791,12 @@ class PosDatabaseService {
     final now = DateTime.now();
     final invoiceNo = 'POS-${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}-${now.hour.toString().padLeft(2, '0')}${now.minute.toString().padLeft(2, '0')}${now.second.toString().padLeft(2, '0')}';
 
+    int? effectiveShiftId = shiftId;
+    if (effectiveShiftId == null) {
+      final active = await getActiveShift();
+      effectiveShiftId = active?.id;
+    }
+
     final trx = PosTransaction(
       invoiceNo: invoiceNo,
       dateTime: now,
@@ -808,7 +814,7 @@ class PosDatabaseService {
       customerId: customerId,
       customerName: customerName.trim().isEmpty ? 'Umum' : customerName.trim(),
       customerPhone: customerPhone?.trim(),
-      shiftId: shiftId,
+      shiftId: effectiveShiftId,
     );
 
     int trxId = 0;
@@ -1381,7 +1387,53 @@ class PosDatabaseService {
       limit: 1,
     );
     if (res.isEmpty) return null;
-    return PosShift.fromMap(res.first);
+    final rawShift = PosShift.fromMap(res.first);
+    final shiftId = rawShift.id;
+    final openedThreshold = rawShift.openedAt.subtract(const Duration(minutes: 1)).toIso8601String();
+
+    // Hitung akumulasi transaksi real-time selama shift ini
+    final trxRes = await db.rawQuery('''
+      SELECT 
+        COUNT(*) as total_trx,
+        SUM(CASE WHEN LOWER(payment_method) = 'tunai' OR LOWER(payment_method) = 'cash' THEN total_amount ELSE 0 END) as cash_sales,
+        SUM(CASE WHEN LOWER(payment_method) = 'qris' THEN total_amount ELSE 0 END) as qris_sales,
+        SUM(CASE WHEN LOWER(payment_method) = 'kasbon' OR LOWER(payment_method) = 'debt' THEN total_amount ELSE 0 END) as debt_sales,
+        SUM(CASE WHEN LOWER(payment_method) NOT IN ('tunai', 'cash', 'qris', 'kasbon', 'debt') THEN total_amount ELSE 0 END) as other_non_cash_sales
+      FROM pos_transactions
+      WHERE (shift_id = ? OR (shift_id IS NULL AND date_time >= ?)) AND status != 'CANCELLED'
+    ''', [shiftId, openedThreshold]);
+
+    final totalTrx = (trxRes.first['total_trx'] as int?) ?? 0;
+    final cashSales = (trxRes.first['cash_sales'] as num?)?.toDouble() ?? 0.0;
+    final qrisSales = (trxRes.first['qris_sales'] as num?)?.toDouble() ?? 0.0;
+    final debtSales = (trxRes.first['debt_sales'] as num?)?.toDouble() ?? 0.0;
+    final otherNonCash = (trxRes.first['other_non_cash_sales'] as num?)?.toDouble() ?? 0.0;
+    final nonCashSales = qrisSales + debtSales + otherNonCash;
+
+    // Hitung kas masuk & kas keluar real-time
+    final flowRes = await db.rawQuery('''
+      SELECT 
+        SUM(CASE WHEN UPPER(type) = 'IN' THEN amount ELSE 0 END) as cash_in,
+        SUM(CASE WHEN UPPER(type) = 'OUT' THEN amount ELSE 0 END) as cash_out
+      FROM pos_cash_flows
+      WHERE (shift_id = ? OR (shift_id IS NULL AND created_at >= ?))
+    ''', [shiftId, openedThreshold]);
+
+    final cashIn = (flowRes.first['cash_in'] as num?)?.toDouble() ?? 0.0;
+    final cashOut = (flowRes.first['cash_out'] as num?)?.toDouble() ?? 0.0;
+
+    final expected = rawShift.startingCash + cashSales + cashIn - cashOut;
+
+    return rawShift.copyWith(
+      totalTransactions: totalTrx,
+      totalCashSales: cashSales,
+      totalQrisSales: qrisSales,
+      totalDebtSales: debtSales,
+      totalNonCashSales: nonCashSales,
+      totalCashIn: cashIn,
+      totalCashOut: cashOut,
+      expectedCash: expected,
+    );
   }
 
   Future<PosShift> openShift({
@@ -1422,18 +1474,19 @@ class PosDatabaseService {
     if (shiftRes.isEmpty) throw Exception('Shift kasir tidak ditemukan');
 
     final currentShift = PosShift.fromMap(shiftRes.first);
+    final openedThreshold = currentShift.openedAt.subtract(const Duration(minutes: 1)).toIso8601String();
 
     // Hitung total transaksi tunai dan non-tunai sejak openedAt
     final trxRes = await db.rawQuery('''
       SELECT 
         COUNT(*) as total_trx,
-        SUM(CASE WHEN payment_method = 'Tunai' THEN total_amount ELSE 0 END) as cash_sales,
-        SUM(CASE WHEN payment_method = 'QRIS' THEN total_amount ELSE 0 END) as qris_sales,
-        SUM(CASE WHEN payment_method = 'Kasbon' THEN total_amount ELSE 0 END) as debt_sales,
-        SUM(CASE WHEN payment_method NOT IN ('Tunai', 'QRIS', 'Kasbon') THEN total_amount ELSE 0 END) as other_non_cash_sales
+        SUM(CASE WHEN LOWER(payment_method) = 'tunai' OR LOWER(payment_method) = 'cash' THEN total_amount ELSE 0 END) as cash_sales,
+        SUM(CASE WHEN LOWER(payment_method) = 'qris' THEN total_amount ELSE 0 END) as qris_sales,
+        SUM(CASE WHEN LOWER(payment_method) = 'kasbon' OR LOWER(payment_method) = 'debt' THEN total_amount ELSE 0 END) as debt_sales,
+        SUM(CASE WHEN LOWER(payment_method) NOT IN ('tunai', 'cash', 'qris', 'kasbon', 'debt') THEN total_amount ELSE 0 END) as other_non_cash_sales
       FROM pos_transactions
       WHERE (shift_id = ? OR (shift_id IS NULL AND date_time >= ?)) AND status != 'CANCELLED'
-    ''', [shiftId, currentShift.openedAt.toIso8601String()]);
+    ''', [shiftId, openedThreshold]);
 
     final totalTrx = (trxRes.first['total_trx'] as int?) ?? 0;
     final cashSales = (trxRes.first['cash_sales'] as num?)?.toDouble() ?? 0.0;
@@ -1445,11 +1498,11 @@ class PosDatabaseService {
     // Hitung kas masuk & kas keluar
     final flowRes = await db.rawQuery('''
       SELECT 
-        SUM(CASE WHEN type = 'IN' THEN amount ELSE 0 END) as cash_in,
-        SUM(CASE WHEN type = 'OUT' THEN amount ELSE 0 END) as cash_out
+        SUM(CASE WHEN UPPER(type) = 'IN' THEN amount ELSE 0 END) as cash_in,
+        SUM(CASE WHEN UPPER(type) = 'OUT' THEN amount ELSE 0 END) as cash_out
       FROM pos_cash_flows
-      WHERE shift_id = ? OR (shift_id IS NULL AND created_at >= ?)
-    ''', [shiftId, currentShift.openedAt.toIso8601String()]);
+      WHERE (shift_id = ? OR (shift_id IS NULL AND created_at >= ?))
+    ''', [shiftId, openedThreshold]);
 
     final cashIn = (flowRes.first['cash_in'] as num?)?.toDouble() ?? 0.0;
     final cashOut = (flowRes.first['cash_out'] as num?)?.toDouble() ?? 0.0;
@@ -1475,6 +1528,20 @@ class PosDatabaseService {
     );
 
     await db.update('pos_shifts', updated.toMap(), where: 'id = ?', whereArgs: [shiftId]);
+
+    // Update semua transaksi dan cash flows unlinked agar terikat ke shiftId ini
+    await db.rawUpdate('''
+      UPDATE pos_transactions 
+      SET shift_id = ? 
+      WHERE shift_id IS NULL AND date_time >= ?
+    ''', [shiftId, openedThreshold]);
+
+    await db.rawUpdate('''
+      UPDATE pos_cash_flows 
+      SET shift_id = ? 
+      WHERE shift_id IS NULL AND created_at >= ?
+    ''', [shiftId, openedThreshold]);
+
     return updated;
   }
 
@@ -1493,8 +1560,14 @@ class PosDatabaseService {
     String cashierName = 'Kasir',
   }) async {
     final db = await database;
+    int? effectiveShiftId = shiftId;
+    if (effectiveShiftId == null) {
+      final active = await getActiveShift();
+      effectiveShiftId = active?.id;
+    }
+
     final flow = PosCashFlow(
-      shiftId: shiftId,
+      shiftId: effectiveShiftId,
       type: type,
       amount: amount,
       category: category,

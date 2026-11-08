@@ -1,3 +1,5 @@
+import '../../models/pos_shift.dart';
+import '../../services/printer_service.dart';
 import '../../models/pos_customer.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -2621,13 +2623,13 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
 
           const SizedBox(height: 14),
 
-          // Tombol Tindakan Utama: Cetak Rekap Kas Harian (Laporan Z)
+          // Tombol Tindakan Utama: Cetak Rekap Kas Harian (Laporan Z) & Riwayat Shift Kasir
           Row(
             children: [
               Expanded(
                 child: ElevatedButton.icon(
-                  icon: const Icon(Icons.print, size: 18),
-                  label: const Text('Cetak Rekap Kas Harian (Laporan Z)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                  icon: const Icon(Icons.print, size: 16),
+                  label: const Text('Cetak Rekap Harian (Laporan Z)', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppConfig.primaryTeal,
                     foregroundColor: Colors.white,
@@ -2647,6 +2649,18 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                     }
                   },
                 ),
+              ),
+              const SizedBox(width: 8),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.history_toggle_off_rounded, size: 16),
+                label: const Text('Riwayat Shift', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppConfig.primaryTeal,
+                  side: const BorderSide(color: AppConfig.primaryTeal),
+                  padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 10),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                onPressed: () => _showAllShiftsModal(context, pos),
               ),
             ],
           ),
@@ -4608,9 +4622,9 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
     );
   }
 
-  void _showCloseShiftDialog(BuildContext context, PosProvider pos) {
-    final shift = pos.activeShift;
-    if (shift == null) return;
+  void _showCloseShiftDialog(BuildContext context, PosProvider pos) async {
+    final shift = await pos.refreshActiveShift();
+    if (shift == null || !context.mounted) return;
 
     final actualCtrl = TextEditingController(text: shift.calculatedExpectedCash.toInt().toString());
     final notesCtrl = TextEditingController();
@@ -4811,9 +4825,32 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
             ),
             actions: [
               TextButton(onPressed: () => Navigator.pop(dCtx), child: const Text('Batal')),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.send_rounded, size: 16),
+                label: const Text('Tutup & Kirim WA', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.green.shade800,
+                  side: BorderSide(color: Colors.green.shade700),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                onPressed: () async {
+                  Navigator.pop(dCtx);
+                  final closed = await pos.closeShift(actualCash: actual, notes: notesCtrl.text, andPrint: false);
+                  if (closed != null && context.mounted) {
+                    await PosWhatsappService.instance.sendShiftReportViaWhatsApp(
+                      shift: closed,
+                      cashFlows: pos.activeCashFlows,
+                      storeName: pos.storeName,
+                    );
+                    if (context.mounted) {
+                      _showShiftClosedSuccessDialog(context, pos, closed);
+                    }
+                  }
+                },
+              ),
               ElevatedButton.icon(
                 icon: const Icon(Icons.print, size: 16),
-                label: const Text('Tutup & Cetak Struk'),
+                label: const Text('Tutup & Cetak Struk', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.green.shade800,
                   foregroundColor: Colors.white,
@@ -4821,17 +4858,295 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                 ),
                 onPressed: () async {
                   Navigator.pop(dCtx);
-                  await pos.closeShift(actualCash: actual, notes: notesCtrl.text, andPrint: true);
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('✅ Shift ditutup dan struk dicetak!'), backgroundColor: Colors.green),
-                    );
+                  final closed = await pos.closeShift(actualCash: actual, notes: notesCtrl.text, andPrint: true);
+                  if (closed != null && context.mounted) {
+                    _showShiftClosedSuccessDialog(context, pos, closed);
                   }
                 },
               ),
             ],
           );
         },
+      ),
+    );
+  }
+
+
+  void _showShiftClosedSuccessDialog(BuildContext context, PosProvider pos, PosShift shift) {
+    showDialog(
+      context: context,
+      builder: (sCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(
+          children: [
+            Icon(Icons.check_circle_rounded, color: Colors.green, size: 28),
+            SizedBox(width: 8),
+            Text('Shift Berhasil Ditutup', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Kasir: ${shift.cashierName}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+            const SizedBox(height: 6),
+            Text('Total Omset: ${_currencyFormat.format(shift.totalSales)}', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12)),
+            Text('Uang Laci Seharusnya: ${_currencyFormat.format(shift.calculatedExpectedCash)}', style: const TextStyle(fontSize: 12)),
+            Text('Uang Fisik Dihitung: ${_currencyFormat.format(shift.actualCash)}', style: const TextStyle(fontSize: 12)),
+            const SizedBox(height: 6),
+            Text(
+              shift.cashDifference == 0
+                  ? 'Status: PAS (Uang Sesuai)'
+                  : (shift.cashDifference > 0
+                      ? 'Status: LEBIH +${_currencyFormat.format(shift.cashDifference)}'
+                      : 'Status: KURANG -${_currencyFormat.format(shift.cashDifference.abs())}'),
+              style: TextStyle(
+                fontWeight: FontWeight.w900,
+                fontSize: 12,
+                color: shift.cashDifference == 0 ? Colors.green : (shift.cashDifference > 0 ? Colors.blue : Colors.red),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          OutlinedButton.icon(
+            icon: const Icon(Icons.send_rounded, size: 16),
+            label: const Text('Kirim ke WA'),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: Colors.green.shade800,
+              side: BorderSide(color: Colors.green.shade600),
+            ),
+            onPressed: () {
+              PosWhatsappService.instance.sendShiftReportViaWhatsApp(
+                shift: shift,
+                cashFlows: pos.activeCashFlows,
+                storeName: pos.storeName,
+              );
+            },
+          ),
+          ElevatedButton.icon(
+            icon: const Icon(Icons.print, size: 16),
+            label: const Text('Cetak Struk'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppConfig.primaryTeal,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () {
+              PrinterService.instance.printShiftReceipt(
+                shift,
+                pos.activeCashFlows,
+                storeName: pos.storeName,
+              );
+            },
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(sCtx),
+            child: const Text('Selesai'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAllShiftsModal(BuildContext context, PosProvider pos) async {
+    final shifts = await PosDatabaseService.instance.getAllShifts(limit: 30);
+    if (!context.mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.white,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (bCtx) => DraggableScrollableSheet(
+        initialChildSize: 0.75,
+        minChildSize: 0.4,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (ctx, scrollCtrl) => Padding(
+          padding: const EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40,
+                  height: 4,
+                  decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Row(
+                    children: [
+                      Icon(Icons.history_toggle_off_rounded, color: AppConfig.primaryTeal),
+                      SizedBox(width: 8),
+                      Text('Riwayat Shift Kasir', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                  IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(bCtx)),
+                ],
+              ),
+              const Divider(),
+              Expanded(
+                child: shifts.isEmpty
+                    ? const Center(
+                        child: Text('Belum ada riwayat shift kasir.', style: TextStyle(color: Color(0xFF64748B))),
+                      )
+                    : ListView.separated(
+                        controller: scrollCtrl,
+                        itemCount: shifts.length,
+                        separatorBuilder: (context, index) => const SizedBox(height: 10),
+                        itemBuilder: (ctx, i) {
+                          final s = shifts[i];
+                          final isClosed = s.status == 'CLOSED';
+                          final openedStr = DateFormat('dd/MM HH:mm').format(s.openedAt);
+                          final closedStr = s.closedAt != null ? DateFormat('HH:mm').format(s.closedAt!) : '-';
+
+                          return Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFFF8FAFC),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(color: const Color(0xFFE2E8F0)),
+                            ),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Row(
+                                      children: [
+                                        Icon(
+                                          isClosed ? Icons.check_circle_rounded : Icons.timelapse_rounded,
+                                          color: isClosed ? Colors.green : Colors.orange,
+                                          size: 16,
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          'Kasir: ${s.cashierName}',
+                                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                        ),
+                                      ],
+                                    ),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: isClosed ? Colors.green.shade50 : Colors.orange.shade50,
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(color: isClosed ? Colors.green.shade200 : Colors.orange.shade200),
+                                      ),
+                                      child: Text(
+                                        isClosed ? 'DITUTUP' : 'AKTIF',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                          color: isClosed ? Colors.green.shade800 : Colors.orange.shade800,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  '$openedStr WIB s/d $closedStr WIB (${s.formattedDuration}) • ${s.totalTransactions} Transaksi',
+                                  style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                                ),
+                                const Divider(height: 12),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text('Modal: ${_currencyFormat.format(s.startingCash)}', style: const TextStyle(fontSize: 11)),
+                                    Text('Omset: ${_currencyFormat.format(s.totalSales)}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                  ],
+                                ),
+                                const SizedBox(height: 2),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: [
+                                    Text('Tunai: ${_currencyFormat.format(s.totalCashSales)}', style: const TextStyle(fontSize: 11, color: Color(0xFF047857))),
+                                    Text('QRIS: ${_currencyFormat.format(s.totalQrisSales)}', style: TextStyle(fontSize: 11, color: Colors.blue.shade700)),
+                                  ],
+                                ),
+                                if (isClosed) ...[
+                                  const SizedBox(height: 4),
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        'Fisik Laci: ${_currencyFormat.format(s.actualCash)}',
+                                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                                      ),
+                                      Text(
+                                        s.cashDifference == 0
+                                            ? 'PAS'
+                                            : (s.cashDifference > 0
+                                                ? 'LEBIH +${_currencyFormat.format(s.cashDifference)}'
+                                                : 'KURANG -${_currencyFormat.format(s.cashDifference.abs())}'),
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w900,
+                                          color: s.cashDifference == 0
+                                              ? Colors.green
+                                              : (s.cashDifference > 0 ? Colors.blue : Colors.red),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                                const SizedBox(height: 8),
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.end,
+                                  children: [
+                                    OutlinedButton.icon(
+                                      icon: const Icon(Icons.send_rounded, size: 14),
+                                      label: const Text('Kirim WA', style: TextStyle(fontSize: 11)),
+                                      style: OutlinedButton.styleFrom(
+                                        foregroundColor: Colors.green.shade800,
+                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                        visualDensity: VisualDensity.compact,
+                                      ),
+                                      onPressed: () {
+                                        PosWhatsappService.instance.sendShiftReportViaWhatsApp(
+                                          shift: s,
+                                          storeName: pos.storeName,
+                                        );
+                                      },
+                                    ),
+                                    const SizedBox(width: 8),
+                                    ElevatedButton.icon(
+                                      icon: const Icon(Icons.print, size: 14),
+                                      label: const Text('Cetak Struk', style: TextStyle(fontSize: 11)),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: AppConfig.primaryTeal,
+                                        foregroundColor: Colors.white,
+                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                        visualDensity: VisualDensity.compact,
+                                      ),
+                                      onPressed: () async {
+                                        final flows = await PosDatabaseService.instance.getCashFlows(shiftId: s.id);
+                                        await PrinterService.instance.printShiftReceipt(
+                                          s,
+                                          flows,
+                                          storeName: pos.storeName,
+                                        );
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
