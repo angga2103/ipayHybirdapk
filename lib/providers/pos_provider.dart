@@ -155,6 +155,7 @@ class PosProvider extends ChangeNotifier {
     _todayStats = await PosDatabaseService.instance.getTodaySalesStats();
     _activeShift = await PosDatabaseService.instance.getActiveShift();
     if (_activeShift != null) {
+      _cashierName = _activeShift!.cashierName;
       _activeCashFlows = await PosDatabaseService.instance.getCashFlows(shiftId: _activeShift!.id);
     } else {
       _activeCashFlows = await PosDatabaseService.instance.getCashFlows(limit: 20);
@@ -279,7 +280,7 @@ class PosProvider extends ChangeNotifier {
         cartItems: _cart,
         cashPaid: cashPaid,
         paymentMethod: paymentMethod,
-        cashierName: _cashierName,
+        cashierName: _activeShift?.cashierName ?? _cashierName,
         note: note,
         customerId: effectiveCId,
         customerName: effectiveCName,
@@ -676,8 +677,15 @@ class PosProvider extends ChangeNotifier {
     }
   }
 
-  Future<PosShift?> openShift({required double startingCash, String? notes}) async {
+  Future<PosShift?> openShift({
+    required double startingCash,
+    String? cashierName,
+    String? notes,
+  }) async {
     try {
+      if (cashierName != null && cashierName.trim().isNotEmpty) {
+        _cashierName = cashierName.trim();
+      }
       final shift = await PosDatabaseService.instance.openShift(
         cashierName: _cashierName,
         startingCash: startingCash,
@@ -738,7 +746,7 @@ class PosProvider extends ChangeNotifier {
         amount: amount,
         category: category,
         note: note,
-        cashierName: _cashierName,
+        cashierName: _activeShift?.cashierName ?? _cashierName,
       );
       await refreshAll();
       return true;
@@ -769,7 +777,7 @@ class PosProvider extends ChangeNotifier {
       await PosDatabaseService.instance.payCustomerDebt(
         debtId: debtId,
         amount: amount,
-        cashierName: _cashierName,
+        cashierName: _activeShift?.cashierName ?? _cashierName,
         note: note,
       );
       await refreshAll();

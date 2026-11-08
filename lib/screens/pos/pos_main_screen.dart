@@ -3339,7 +3339,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                       ),
                       const SizedBox(height: 3),
                       Text(
-                        '${trx.dateTime.hour.toString().padLeft(2, '0')}:${trx.dateTime.minute.toString().padLeft(2, '0')} • ${trx.totalActiveItemsQty} Item Aktif • Laba: ${_currencyFormat.format(trx.profitAmount)}',
+                        '${trx.dateTime.hour.toString().padLeft(2, '0')}:${trx.dateTime.minute.toString().padLeft(2, '0')} • Kasir: ${trx.cashierName} • ${trx.totalActiveItemsQty} Item • Laba: ${_currencyFormat.format(trx.profitAmount)}',
                         style: const TextStyle(fontSize: 10.5, color: Color(0xFF64748B)),
                       ),
                     ],
@@ -4723,7 +4723,9 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
 
   void _showOpenShiftDialog(BuildContext context, PosProvider pos) {
     final modalCtrl = TextEditingController(text: '100000');
-    final noteCtrl = TextEditingController();
+    final cashierCtrl = TextEditingController(
+      text: (pos.cashierName.isNotEmpty && pos.cashierName != 'Kasir') ? pos.cashierName : '',
+    );
 
     showDialog(
       context: context,
@@ -4741,24 +4743,27 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Masukkan modal awal uang tunai (kembalian) di laci kasir sebelum memulai transaksi:',
+              'Masukkan modal awal dan nama penanggung jawab kasir untuk audit transaksi & struk:',
               style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
             ),
             const SizedBox(height: 14),
+            TextField(
+              controller: cashierCtrl,
+              textCapitalization: TextCapitalization.words,
+              decoration: InputDecoration(
+                labelText: 'Nama Kasir (Penanggung Jawab Shift)',
+                hintText: 'Misal: Budi, Siti, Kasir 1...',
+                prefixIcon: const Icon(Icons.person_outline_rounded, color: AppConfig.primaryTeal),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+            const SizedBox(height: 12),
             TextField(
               controller: modalCtrl,
               keyboardType: TextInputType.number,
               decoration: InputDecoration(
                 labelText: 'Modal Awal Kasir (Uang Kembalian)',
                 prefixText: 'Rp ',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-            ),
-            const SizedBox(height: 10),
-            TextField(
-              controller: noteCtrl,
-              decoration: InputDecoration(
-                labelText: 'Catatan Shift (Opsional)',
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
               ),
             ),
@@ -4774,11 +4779,19 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
             ),
             onPressed: () async {
               final modal = double.tryParse(modalCtrl.text) ?? 0.0;
+              final rawName = cashierCtrl.text.trim();
+              final cashierName = rawName.isNotEmpty ? rawName : 'Kasir';
               Navigator.pop(dCtx);
-              await pos.openShift(startingCash: modal, notes: noteCtrl.text);
+              await pos.openShift(
+                startingCash: modal,
+                cashierName: cashierName,
+              );
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('✅ Shift kasir berhasil dibuka!'), backgroundColor: Colors.green),
+                  SnackBar(
+                    content: Text('✅ Shift kasir berhasil dibuka untuk "$cashierName"!'),
+                    backgroundColor: Colors.green,
+                  ),
                 );
               }
             },
