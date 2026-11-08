@@ -26,11 +26,31 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
           cache: true
+
+      - name: Pre-cache Gradle Wrapper
+        run: |
+          chmod +x android/gradlew
+          TARGET="$HOME/.gradle/wrapper/dists/gradle-9.3.1-bin/23ovyewtku6u96viwx3xl3oks"
+          mkdir -p "$TARGET"
+          if [ ! -f "$TARGET/gradle-9.3.1-bin.zip.ok" ]; then
+            echo "Pre-downloading Gradle 9.3.1-bin wrapper..."
+            curl -L --retry 5 --retry-delay 2 --connect-timeout 20 -m 300 -f "https://services.gradle.org/distributions/gradle-9.3.1-bin.zip" -o "$TARGET/gradle-9.3.1-bin.zip" || \
+            curl -L --retry 5 --retry-delay 2 --connect-timeout 20 -m 300 -f "https://mirrors.cloud.tencent.com/gradle/gradle-9.3.1-bin.zip" -o "$TARGET/gradle-9.3.1-bin.zip" || \
+            curl -L --retry 5 --retry-delay 2 --connect-timeout 20 -m 300 -f "https://downloads.gradle-dn.com/distributions/gradle-9.3.1-bin.zip" -o "$TARGET/gradle-9.3.1-bin.zip"
+            if [ -f "$TARGET/gradle-9.3.1-bin.zip" ]; then
+              touch "$TARGET/gradle-9.3.1-bin.zip.ok"
+              echo "Gradle wrapper ready at $TARGET"
+            fi
+          fi
+          (cd android && ./gradlew --version) || echo "Gradle wrapper init completed with code $?"
 
       - name: Get Dependencies
         run: flutter pub get
