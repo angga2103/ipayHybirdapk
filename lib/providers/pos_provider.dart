@@ -22,6 +22,9 @@ class PosProvider extends ChangeNotifier {
   final List<PosCartItem> _cart = [];
   List<ConsignmentSummary> _consignments = [];
   List<PosTransaction> _transactions = [];
+  DateTime? _historyDate = DateTime.now();
+  bool _historyAllDates = false;
+  String _historyInvoiceQuery = '';
   List<Map<String, dynamic>> _holdCarts = [];
   Map<String, double> _todayStats = {
     'total_omset': 0.0,
@@ -55,6 +58,9 @@ class PosProvider extends ChangeNotifier {
   List<PosCartItem> get cart => List.unmodifiable(_cart);
   List<ConsignmentSummary> get consignments => _consignments;
   List<PosTransaction> get transactions => _transactions;
+  DateTime? get historyDate => _historyDate;
+  bool get historyAllDates => _historyAllDates;
+  String get historyInvoiceQuery => _historyInvoiceQuery;
   List<Map<String, dynamic>> get holdCarts => _holdCarts;
   int get holdCartsCount => _holdCarts.length;
   Map<String, double> get todayStats => _todayStats;
@@ -140,7 +146,11 @@ class PosProvider extends ChangeNotifier {
     _products = await PosDatabaseService.instance.getAllProducts(includeArchived: false);
     _categories = await PosDatabaseService.instance.getAllCategories();
     _consignments = await PosDatabaseService.instance.getConsignmentSummaries();
-    _transactions = await PosDatabaseService.instance.getAllTransactions(limit: 50);
+    _transactions = await PosDatabaseService.instance.getTransactions(
+      date: _historyAllDates ? null : _historyDate,
+      searchQuery: _historyInvoiceQuery.isNotEmpty ? _historyInvoiceQuery : null,
+      limit: 150,
+    );
     _holdCarts = await PosDatabaseService.instance.getAllHoldCarts();
     _todayStats = await PosDatabaseService.instance.getTodaySalesStats();
     _activeShift = await PosDatabaseService.instance.getActiveShift();
@@ -245,6 +255,16 @@ class PosProvider extends ChangeNotifier {
     DateTime? dueDate,
   }) async {
     if (_cart.isEmpty) return null;
+
+    // Proteksi Keamanan: Shift Kasir Wajib Aktif
+    if (_activeShift == null || !_activeShift!.isOpen) {
+      _activeShift = await PosDatabaseService.instance.getActiveShift();
+    }
+    if (_activeShift == null || !_activeShift!.isOpen) {
+      _errorMessage = 'Shift kasir belum dibuka! Silakan buka shift kasir dan isi modal awal terlebih dahulu.';
+      notifyListeners();
+      return null;
+    }
 
     final effectiveCName = customerName?.trim().isNotEmpty == true 
         ? customerName!.trim() 
@@ -701,6 +721,16 @@ class PosProvider extends ChangeNotifier {
     required String category,
     String? note,
   }) async {
+    // Proteksi Keamanan: Shift Kasir Wajib Aktif
+    if (_activeShift == null || !_activeShift!.isOpen) {
+      _activeShift = await PosDatabaseService.instance.getActiveShift();
+    }
+    if (_activeShift == null || !_activeShift!.isOpen) {
+      _errorMessage = 'Shift kasir belum dibuka! Buka shift kasir terlebih dahulu untuk mencatat kas operasional.';
+      notifyListeners();
+      return false;
+    }
+
     try {
       await PosDatabaseService.instance.recordCashFlow(
         shiftId: _activeShift?.id,
@@ -725,6 +755,16 @@ class PosProvider extends ChangeNotifier {
     required double amount,
     String? note,
   }) async {
+    // Proteksi Keamanan: Shift Kasir Wajib Aktif
+    if (_activeShift == null || !_activeShift!.isOpen) {
+      _activeShift = await PosDatabaseService.instance.getActiveShift();
+    }
+    if (_activeShift == null || !_activeShift!.isOpen) {
+      _errorMessage = 'Shift kasir belum dibuka! Buka shift kasir terlebih dahulu untuk mencatat pelunasan kasbon.';
+      notifyListeners();
+      return false;
+    }
+
     try {
       await PosDatabaseService.instance.payCustomerDebt(
         debtId: debtId,
@@ -739,6 +779,52 @@ class PosProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     }
+  }
+
+  // --- Filter & Riwayat Transaksi Kasir ---
+  Future<void> setHistoryDate(DateTime date) async {
+    _historyDate = date;
+    _historyAllDates = false;
+    await _reloadHistoryTransactions();
+  }
+
+  Future<void> setHistoryToday() async {
+    _historyDate = DateTime.now();
+    _historyAllDates = false;
+    await _reloadHistoryTransactions();
+  }
+
+  Future<void> setHistoryYesterday() async {
+    _historyDate = DateTime.now().subtract(const Duration(days: 1));
+    _historyAllDates = false;
+    await _reloadHistoryTransactions();
+  }
+
+  Future<void> setHistoryAllDates() async {
+    _historyAllDates = true;
+    _historyDate = null;
+    await _reloadHistoryTransactions();
+  }
+
+  Future<void> setHistoryInvoiceQuery(String query) async {
+    _historyInvoiceQuery = query.trim();
+    await _reloadHistoryTransactions();
+  }
+
+  Future<void> resetHistoryFilters() async {
+    _historyDate = DateTime.now();
+    _historyAllDates = false;
+    _historyInvoiceQuery = '';
+    await _reloadHistoryTransactions();
+  }
+
+  Future<void> _reloadHistoryTransactions() async {
+    _transactions = await PosDatabaseService.instance.getTransactions(
+      date: _historyAllDates ? null : _historyDate,
+      searchQuery: _historyInvoiceQuery.isNotEmpty ? _historyInvoiceQuery : null,
+      limit: 150,
+    );
+    notifyListeners();
   }
 
   // --- Cetak Barcode & QR Code Label ---

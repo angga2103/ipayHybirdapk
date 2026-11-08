@@ -33,6 +33,7 @@ class PosMainScreen extends StatefulWidget {
 class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final TextEditingController _searchCtrl = TextEditingController();
+  final TextEditingController _historyInvoiceCtrl = TextEditingController();
   final NumberFormat _currencyFormat = NumberFormat.currency(
     locale: 'id_ID',
     symbol: 'Rp ',
@@ -49,7 +50,13 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
   void dispose() {
     _tabController.dispose();
     _searchCtrl.dispose();
+    _historyInvoiceCtrl.dispose();
     super.dispose();
+  }
+
+  bool _isSameDay(DateTime? a, DateTime? b) {
+    if (a == null || b == null) return false;
+    return a.year == b.year && a.month == b.month && a.day == b.day;
   }
 
   @override
@@ -1045,6 +1052,10 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                           child: ElevatedButton(
                             onPressed: () {
                               Navigator.pop(ctx);
+                              if (!pos.hasActiveShift) {
+                                _showShiftRequiredDialog(context, pos, actionTitle: 'Transaksi Penjualan');
+                                return;
+                              }
                               _openPaymentModal(context, pos);
                             },
                             style: ElevatedButton.styleFrom(
@@ -1326,6 +1337,10 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
 
   // Modal Pembayaran & Cetak Struk (Tunai, QRIS, & Kasbon)
   void _openPaymentModal(BuildContext context, PosProvider pos) {
+    if (!pos.hasActiveShift) {
+      _showShiftRequiredDialog(context, pos, actionTitle: 'Transaksi Penjualan');
+      return;
+    }
     final total = pos.cartTotal;
     final cashCtrl = TextEditingController(text: total.toInt().toString());
     final customerNameCtrl = TextEditingController(
@@ -2978,10 +2993,174 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
 
           const SizedBox(height: 20),
 
-          const Text(
-            'Riwayat Transaksi Terakhir',
-            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Color(0xFF0F172A)),
+          // Header Riwayat Transaksi & Filter Interaktif
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'Riwayat Transaksi',
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: Color(0xFF0F172A)),
+              ),
+              if (!pos.historyAllDates && pos.historyDate != null)
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: AppConfig.primaryTeal.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Text(
+                    DateFormat('dd MMM yyyy').format(pos.historyDate!),
+                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppConfig.primaryTeal),
+                  ),
+                ),
+            ],
           ),
+          const SizedBox(height: 10),
+
+          // Baris Filter Tanggal Cepat & DatePicker
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                ChoiceChip(
+                  label: const Text('Hari Ini'),
+                  selected: !pos.historyAllDates && _isSameDay(pos.historyDate, DateTime.now()),
+                  selectedColor: AppConfig.primaryTeal,
+                  labelStyle: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: (!pos.historyAllDates && _isSameDay(pos.historyDate, DateTime.now())) ? Colors.white : const Color(0xFF334155),
+                  ),
+                  onSelected: (val) {
+                    if (val) pos.setHistoryToday();
+                  },
+                ),
+                const SizedBox(width: 6),
+                ChoiceChip(
+                  label: const Text('Kemarin'),
+                  selected: !pos.historyAllDates && _isSameDay(pos.historyDate, DateTime.now().subtract(const Duration(days: 1))),
+                  selectedColor: AppConfig.primaryTeal,
+                  labelStyle: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: (!pos.historyAllDates && _isSameDay(pos.historyDate, DateTime.now().subtract(const Duration(days: 1)))) ? Colors.white : const Color(0xFF334155),
+                  ),
+                  onSelected: (val) {
+                    if (val) pos.setHistoryYesterday();
+                  },
+                ),
+                const SizedBox(width: 6),
+                ActionChip(
+                  avatar: const Icon(Icons.calendar_today_rounded, size: 14, color: AppConfig.primaryTeal),
+                  label: Text(
+                    (!pos.historyAllDates && !_isSameDay(pos.historyDate, DateTime.now()) && !_isSameDay(pos.historyDate, DateTime.now().subtract(const Duration(days: 1))))
+                        ? DateFormat('dd/MM/yyyy').format(pos.historyDate ?? DateTime.now())
+                        : 'Pilih Tanggal',
+                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                  ),
+                  backgroundColor: (!pos.historyAllDates && !_isSameDay(pos.historyDate, DateTime.now()) && !_isSameDay(pos.historyDate, DateTime.now().subtract(const Duration(days: 1))))
+                      ? AppConfig.primaryTeal.withValues(alpha: 0.15)
+                      : Colors.white,
+                  side: BorderSide(color: Colors.grey.shade300),
+                  onPressed: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: pos.historyDate ?? DateTime.now(),
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime.now().add(const Duration(days: 365)),
+                    );
+                    if (picked != null) {
+                      pos.setHistoryDate(picked);
+                    }
+                  },
+                ),
+                const SizedBox(width: 6),
+                ChoiceChip(
+                  label: const Text('Semua Tanggal'),
+                  selected: pos.historyAllDates,
+                  selectedColor: AppConfig.primaryTeal,
+                  labelStyle: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: pos.historyAllDates ? Colors.white : const Color(0xFF334155),
+                  ),
+                  onSelected: (val) {
+                    if (val) pos.setHistoryAllDates();
+                  },
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 10),
+
+          // Kolom Input Pencarian Nomor Nota / Pelanggan
+          Container(
+            height: 42,
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: TextField(
+              controller: _historyInvoiceCtrl,
+              onChanged: (val) => pos.setHistoryInvoiceQuery(val),
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+              decoration: InputDecoration(
+                hintText: 'Cari No. Nota (mis: POS-...) atau Pelanggan...',
+                hintStyle: TextStyle(fontSize: 11.5, color: Colors.grey.shade400),
+                prefixIcon: const Icon(Icons.search, size: 18, color: Color(0xFF64748B)),
+                suffixIcon: _historyInvoiceCtrl.text.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.clear, size: 16),
+                        onPressed: () {
+                          _historyInvoiceCtrl.clear();
+                          pos.setHistoryInvoiceQuery('');
+                        },
+                      )
+                    : null,
+                border: InputBorder.none,
+                contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+              ),
+            ),
+          ),
+
+          const SizedBox(height: 10),
+
+          // Ringkasan Filter & Tombol Reset
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.receipt_long_rounded, size: 14, color: Color(0xFF64748B)),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${trxs.length} transaksi (${_currencyFormat.format(trxs.fold(0.0, (sum, t) => sum + (t.isCancelled ? 0 : t.totalAmount)))})',
+                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF64748B)),
+                  ),
+                ],
+              ),
+              if (pos.historyAllDates || !_isSameDay(pos.historyDate, DateTime.now()) || pos.historyInvoiceQuery.isNotEmpty)
+                InkWell(
+                  onTap: () {
+                    _historyInvoiceCtrl.clear();
+                    pos.resetHistoryFilters();
+                  },
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    child: Row(
+                      children: [
+                        Icon(Icons.refresh_rounded, size: 12, color: Colors.orange),
+                        SizedBox(width: 2),
+                        Text('Reset Filter', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Colors.orange)),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
+          ),
+
           const SizedBox(height: 10),
 
           if (trxs.isEmpty)
@@ -2990,9 +3169,28 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                 padding: const EdgeInsets.symmetric(vertical: 40),
                 child: Column(
                   children: [
-                    Icon(Icons.receipt_long, size: 48, color: Colors.grey.shade400),
+                    Icon(Icons.receipt_long, size: 48, color: Colors.grey.shade300),
                     const SizedBox(height: 8),
-                    Text('Belum ada transaksi hari ini', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                    Text(
+                      pos.historyInvoiceQuery.isNotEmpty
+                          ? 'Tidak ada transaksi dengan nota/nama "${pos.historyInvoiceQuery}"'
+                          : (!pos.historyAllDates && pos.historyDate != null)
+                              ? 'Tidak ada transaksi pada ${DateFormat("dd MMMM yyyy").format(pos.historyDate!)}'
+                              : 'Belum ada riwayat transaksi.',
+                      style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                      textAlign: TextAlign.center,
+                    ),
+                    if (pos.historyInvoiceQuery.isNotEmpty || !pos.historyAllDates) ...[
+                      const SizedBox(height: 8),
+                      TextButton.icon(
+                        icon: const Icon(Icons.today, size: 14),
+                        label: const Text('Tampilkan Transaksi Hari Ini', style: TextStyle(fontSize: 11)),
+                        onPressed: () {
+                          _historyInvoiceCtrl.clear();
+                          pos.resetHistoryFilters();
+                        },
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -4351,10 +4549,12 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
     final shift = pos.activeShift;
     final isOpen = shift != null && shift.isOpen;
 
-    return Container(
-      color: isOpen ? const Color(0xFFF0FDF4) : const Color(0xFFFFFBEB),
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(
+    return InkWell(
+      onTap: isOpen ? null : () => _showOpenShiftDialog(context, pos),
+      child: Container(
+        color: isOpen ? const Color(0xFFF0FDF4) : const Color(0xFFFFFBEB),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Row(
@@ -4439,6 +4639,85 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
             ),
         ],
       ),
+    ),
+    );
+  }
+
+  void _showShiftRequiredDialog(BuildContext context, PosProvider pos, {required String actionTitle}) {
+    showDialog(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.amber.shade100,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(Icons.lock_clock_rounded, color: Colors.amber.shade900, size: 24),
+            ),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text(
+                'Shift Kasir Belum Buka',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Untuk menjaga keamanan uang laci kasir dan memastikan laporan pertanggungjawaban kasir tercatat akurat, $actionTitle wajib dilakukan saat shift kasir aktif.',
+              style: const TextStyle(fontSize: 13, height: 1.4, color: Color(0xFF334155)),
+            ),
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFEF3C7),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: const Color(0xFFFDE68A)),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.info_outline_rounded, size: 18, color: Color(0xFF92400E)),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Silakan buka shift kasir dan masukkan modal awal kasir sekarang.',
+                      style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF92400E)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx),
+            child: const Text('Batal', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton.icon(
+            icon: const Icon(Icons.play_arrow_rounded, size: 18),
+            label: const Text('Buka Shift Sekarang', style: TextStyle(fontWeight: FontWeight.bold)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppConfig.primaryTeal,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: () {
+              Navigator.pop(dCtx);
+              _showOpenShiftDialog(context, pos);
+            },
+          ),
+        ],
+      ),
     );
   }
 
@@ -4511,6 +4790,10 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
   }
 
   void _showAddCashFlowDialog(BuildContext context, PosProvider pos) {
+    if (!pos.hasActiveShift) {
+      _showShiftRequiredDialog(context, pos, actionTitle: 'Kas Masuk / Keluar Operasional');
+      return;
+    }
     String type = 'OUT';
     String category = 'Operasional';
     final amountCtrl = TextEditingController();
@@ -5441,7 +5724,13 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                               padding: const EdgeInsets.symmetric(vertical: 8),
                                             ),
-                                            onPressed: () => _showPayDebtDialog(context, pos, d, () => setSheetState(() {})),
+                                            onPressed: () {
+                                              if (!pos.hasActiveShift) {
+                                                _showShiftRequiredDialog(context, pos, actionTitle: 'Pelunasan Kasbon');
+                                                return;
+                                              }
+                                              _showPayDebtDialog(context, pos, d, () => setSheetState(() {}));
+                                            },
                                           ),
                                         ),
                                         if (d.customerPhone != null && d.customerPhone!.trim().isNotEmpty) ...[
@@ -5470,6 +5759,10 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
   }
 
   void _showPayDebtDialog(BuildContext context, PosProvider pos, PosCustomerDebt debt, VoidCallback onUpdated) {
+    if (!pos.hasActiveShift) {
+      _showShiftRequiredDialog(context, pos, actionTitle: 'Pelunasan Kasbon');
+      return;
+    }
     final payCtrl = TextEditingController(text: debt.remainingAmount.toInt().toString());
 
     showDialog(

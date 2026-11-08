@@ -1110,10 +1110,37 @@ class PosDatabaseService {
   // QUERY RIWAYAT LENGKAP TRANSAKSI
   // ==========================================
 
-  Future<List<PosTransaction>> getAllTransactions({int limit = 50}) async {
+  Future<List<PosTransaction>> getTransactions({
+    DateTime? date,
+    String? searchQuery,
+    int limit = 200,
+  }) async {
     final db = await database;
+    final List<String> whereClauses = [];
+    final List<dynamic> whereArgs = [];
+
+    if (date != null) {
+      final y = date.year.toString();
+      final m = date.month.toString().padLeft(2, '0');
+      final d = date.day.toString().padLeft(2, '0');
+      final datePrefix = '$y-$m-$d';
+      whereClauses.add('date_time LIKE ?');
+      whereArgs.add('$datePrefix%');
+    }
+
+    if (searchQuery != null && searchQuery.trim().isNotEmpty) {
+      final clean = searchQuery.trim();
+      whereClauses.add('(invoice_no LIKE ? OR customer_name LIKE ?)');
+      whereArgs.add('%$clean%');
+      whereArgs.add('%$clean%');
+    }
+
+    final where = whereClauses.isNotEmpty ? whereClauses.join(' AND ') : null;
+
     final List<Map<String, dynamic>> maps = await db.query(
       'pos_transactions',
+      where: where,
+      whereArgs: whereArgs.isNotEmpty ? whereArgs : null,
       orderBy: 'date_time DESC',
       limit: limit,
     );
@@ -1142,6 +1169,10 @@ class PosDatabaseService {
       trxs.add(PosTransaction.fromMap(m, items, returns));
     }
     return trxs;
+  }
+
+  Future<List<PosTransaction>> getAllTransactions({int limit = 50}) async {
+    return getTransactions(limit: limit);
   }
 
   Future<PosTransaction?> getTransactionByInvoice(String invoiceNo) async {

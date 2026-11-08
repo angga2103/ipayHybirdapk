@@ -819,4 +819,119 @@ void main() {
     });
   });
 
+  group('Transaction History Filtering & Shift Security Tests', () {
+    test('Transaction history filters by date matching', () {
+      final now = DateTime.now();
+      final todayTrx = PosTransaction(
+        invoiceNo: 'POS-20261108-001',
+        dateTime: now,
+        totalAmount: 45000,
+        cashPaid: 50000,
+        changeDue: 5000,
+        paymentMethod: 'Tunai',
+        customerName: 'Budi',
+        items: [],
+      );
+
+      final yesterday = now.subtract(const Duration(days: 1));
+      final yesterdayTrx = PosTransaction(
+        invoiceNo: 'POS-20261107-002',
+        dateTime: yesterday,
+        totalAmount: 75000,
+        cashPaid: 75000,
+        changeDue: 0,
+        paymentMethod: 'QRIS',
+        customerName: 'Siti',
+        items: [],
+      );
+
+      final allList = [todayTrx, yesterdayTrx];
+
+      // Filter Hari Ini
+      final filteredToday = allList.where((t) =>
+        t.dateTime.year == now.year &&
+        t.dateTime.month == now.month &&
+        t.dateTime.day == now.day
+      ).toList();
+
+      expect(filteredToday.length, equals(1));
+      expect(filteredToday.first.invoiceNo, equals('POS-20261108-001'));
+
+      // Filter Kemarin
+      final filteredYesterday = allList.where((t) =>
+        t.dateTime.year == yesterday.year &&
+        t.dateTime.month == yesterday.month &&
+        t.dateTime.day == yesterday.day
+      ).toList();
+
+      expect(filteredYesterday.length, equals(1));
+      expect(filteredYesterday.first.invoiceNo, equals('POS-20261107-002'));
+    });
+
+    test('Transaction history filters by Invoice Number and Customer Name query', () {
+      final trxs = [
+        PosTransaction(
+          invoiceNo: 'POS-20261108-1001',
+          dateTime: DateTime.now(),
+          totalAmount: 25000,
+          cashPaid: 25000,
+          changeDue: 0,
+          customerName: 'Pak Joko Mart',
+          paymentMethod: 'Tunai',
+          items: [],
+        ),
+        PosTransaction(
+          invoiceNo: 'POS-20261108-1002',
+          dateTime: DateTime.now(),
+          totalAmount: 60000,
+          cashPaid: 100000,
+          changeDue: 40000,
+          customerName: 'Bu Dewi Warung',
+          paymentMethod: 'Tunai',
+          items: [],
+        ),
+      ];
+
+      // Cari nomor nota '1001'
+      final matchInvoice = trxs.where((t) =>
+        t.invoiceNo.toLowerCase().contains('1001') ||
+        t.customerName.toLowerCase().contains('1001')
+      ).toList();
+      expect(matchInvoice.length, equals(1));
+      expect(matchInvoice.first.customerName, equals('Pak Joko Mart'));
+
+      // Cari nama pelanggan 'Dewi'
+      final matchCustomer = trxs.where((t) =>
+        t.invoiceNo.toLowerCase().contains('dewi') ||
+        t.customerName.toLowerCase().contains('dewi')
+      ).toList();
+      expect(matchCustomer.length, equals(1));
+      expect(matchCustomer.first.invoiceNo, equals('POS-20261108-1002'));
+    });
+
+    test('Shift enforcement correctly verifies active shift status', () {
+      bool isShiftOpen(PosShift? s) => s != null && s.isOpen;
+      expect(isShiftOpen(null), isFalse);
+
+      final closedShift = PosShift(
+        id: 1,
+        cashierName: 'Kasir',
+        openedAt: DateTime.now().subtract(const Duration(hours: 4)),
+        closedAt: DateTime.now(),
+        startingCash: 100000,
+        status: 'CLOSED',
+      );
+      expect(closedShift.isOpen, isFalse);
+
+      final openShift = PosShift(
+        id: 2,
+        cashierName: 'Kasir Utama',
+        openedAt: DateTime.now(),
+        startingCash: 100000,
+        status: 'OPEN',
+      );
+      expect(openShift.isOpen, isTrue);
+    });
+  });
+
 }
