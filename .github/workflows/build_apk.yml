@@ -40,17 +40,20 @@ jobs:
           chmod +x android/gradlew
           TARGET="$HOME/.gradle/wrapper/dists/gradle-9.3.1-bin/23ovyewtku6u96viwx3xl3oks"
           mkdir -p "$TARGET"
-          if [ ! -f "$TARGET/gradle-9.3.1-bin.zip.ok" ]; then
+          if [ ! -d "$TARGET/gradle-9.3.1" ] || [ ! -f "$TARGET/gradle-9.3.1-bin.zip.ok" ]; then
             echo "Pre-downloading Gradle 9.3.1-bin wrapper..."
             curl -L --retry 5 --retry-delay 2 --connect-timeout 20 -m 300 -f "https://services.gradle.org/distributions/gradle-9.3.1-bin.zip" -o "$TARGET/gradle-9.3.1-bin.zip" || \
             curl -L --retry 5 --retry-delay 2 --connect-timeout 20 -m 300 -f "https://mirrors.cloud.tencent.com/gradle/gradle-9.3.1-bin.zip" -o "$TARGET/gradle-9.3.1-bin.zip" || \
             curl -L --retry 5 --retry-delay 2 --connect-timeout 20 -m 300 -f "https://downloads.gradle-dn.com/distributions/gradle-9.3.1-bin.zip" -o "$TARGET/gradle-9.3.1-bin.zip"
             if [ -f "$TARGET/gradle-9.3.1-bin.zip" ]; then
+              echo "Extracting Gradle wrapper distribution..."
+              unzip -q -o "$TARGET/gradle-9.3.1-bin.zip" -d "$TARGET"
               touch "$TARGET/gradle-9.3.1-bin.zip.ok"
-              echo "Gradle wrapper ready at $TARGET"
+              echo "Gradle wrapper ready at $TARGET:"
+              ls -la "$TARGET"
             fi
           fi
-          (cd android && ./gradlew --version) || echo "Gradle wrapper init completed with code $?"
+          cd android && ./gradlew --version
 
       - name: Get Dependencies
         run: flutter pub get
