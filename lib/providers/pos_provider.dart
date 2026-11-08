@@ -1,3 +1,4 @@
+import '../models/pos_customer.dart';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import '../models/pos_cart_item.dart';
@@ -39,6 +40,8 @@ class PosProvider extends ChangeNotifier {
   PosShift? _activeShift;
   List<PosCashFlow> _activeCashFlows = [];
   List<PosCustomerDebt> _debts = [];
+  List<PosCustomer> _customers = [];
+  PosCustomer? _selectedCustomer;
   Map<String, dynamic> _debtSummary = {
     'active_count': 0,
     'total_unpaid': 0.0,
@@ -65,6 +68,9 @@ class PosProvider extends ChangeNotifier {
   List<PosCashFlow> get activeCashFlows => _activeCashFlows;
   List<PosCustomerDebt> get debts => _debts;
   Map<String, dynamic> get debtSummary => _debtSummary;
+  List<PosCustomer> get customers => _customers;
+  PosCustomer? get selectedCustomer => _selectedCustomer;
+  String get effectiveCustomerName => _selectedCustomer?.displayName ?? 'Umum';
 
   void toggleViewMode() {
     _isGridView = !_isGridView;
@@ -145,6 +151,7 @@ class PosProvider extends ChangeNotifier {
     }
     _debts = await PosDatabaseService.instance.getAllDebts();
     _debtSummary = await PosDatabaseService.instance.getDebtSummary();
+    _customers = await PosDatabaseService.instance.getCustomers();
     notifyListeners();
   }
 
@@ -232,11 +239,20 @@ class PosProvider extends ChangeNotifier {
     String paymentMethod = 'Tunai',
     String? note,
     bool autoPrint = true,
+    int? customerId,
     String? customerName,
     String? customerPhone,
     DateTime? dueDate,
   }) async {
     if (_cart.isEmpty) return null;
+
+    final effectiveCName = customerName?.trim().isNotEmpty == true 
+        ? customerName!.trim() 
+        : (_selectedCustomer?.displayName ?? 'Umum');
+    final effectiveCId = customerId ?? _selectedCustomer?.id;
+    final effectiveCPhone = customerPhone?.trim().isNotEmpty == true 
+        ? customerPhone!.trim() 
+        : _selectedCustomer?.phone;
 
     try {
       final trx = await PosDatabaseService.instance.checkoutTransaction(
@@ -245,15 +261,20 @@ class PosProvider extends ChangeNotifier {
         paymentMethod: paymentMethod,
         cashierName: _cashierName,
         note: note,
+        customerId: effectiveCId,
+        customerName: effectiveCName,
+        customerPhone: effectiveCPhone,
+        shiftId: _activeShift?.id,
       );
 
       // Jika metode pembayaran Kasbon, catat ke pos_customer_debts
-      if (paymentMethod.toLowerCase() == 'kasbon' && customerName != null && customerName.trim().isNotEmpty) {
+      if (paymentMethod.toLowerCase() == 'kasbon' && effectiveCName.isNotEmpty) {
         await PosDatabaseService.instance.recordCustomerDebt(
           transactionId: trx.id,
+          customerId: effectiveCId,
           invoiceNo: trx.invoiceNo,
-          customerName: customerName,
-          customerPhone: customerPhone,
+          customerName: effectiveCName,
+          customerPhone: effectiveCPhone,
           totalAmount: trx.totalAmount,
           dueDate: dueDate,
           notes: note,
@@ -261,6 +282,7 @@ class PosProvider extends ChangeNotifier {
       }
 
       _cart.clear();
+      _selectedCustomer = null; // Reset ke 'Umum' untuk transaksi berikutnya
       await refreshAll();
 
       if (autoPrint) {
@@ -720,6 +742,74 @@ class PosProvider extends ChangeNotifier {
       );
     } catch (e) {
       debugPrint('[PosProvider] Error printProductBarcode: $e');
+      return false;
+    }
+  }
+
+  // --- Master Pelanggan Methods ---
+  void selectCustomer(PosCustomer? customer) {
+    _selectedCustomer = customer;
+    notifyListeners();
+  }
+
+  Future<void> loadCustomers({String? query}) async {
+    _customers = await PosDatabaseService.instance.getCustomers(searchQuery: query);
+    notifyListeners();
+  }
+
+  Future<PosCustomer?> addCustomer({
+    required String name,
+    String? phone,
+    String? address,
+    String? notes,
+  }) async {
+    try {
+      final now = DateTime.now();
+      final cust = PosCustomer(
+        name: name.trim(),
+        phone: phone?.trim(),
+        address: address?.trim(),
+        notes: notes?.trim(),
+        createdAt: now,
+        updatedAt: now,
+      );
+      final id = await PosDatabaseService.instance.insertCustomer(cust);
+      final created = cust.copyWith(id: id);
+      await loadCustomers();
+      return created;
+    } catch (e) {
+      _errorMessage = 'Gagal menambahkan pelanggan: $e';
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<bool> updateCustomer(PosCustomer customer) async {
+    try {
+      await PosDatabaseService.instance.updateCustomer(customer);
+      await loadCustomers();
+      if (_selectedCustomer?.id == customer.id) {
+        _selectedCustomer = customer;
+      }
+      return true;
+    } catch (e) {
+      _errorMessage = 'Gagal memperbarui pelanggan: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<bool> deleteCustomer(int id) async {
+    try {
+      await PosDatabaseService.instance.deleteCustomer(id);
+      if (_selectedCustomer?.id == id) {
+        _selectedCustomer = null;
+      }
+      await loadCustomers();
+      return true;
+    } catch (e) {
+      _errorMessage = 'Gagal menghapus pelanggan: $e';
+      notifyListeners();
       return false;
     }
   }

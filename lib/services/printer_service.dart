@@ -721,6 +721,7 @@ class PrinterService {
     String? orderNo,
     String? date,
     String? cashierName,
+    String? customerName,
     required List<Map<String, dynamic>> items,
     String? subtotal,
     String? discount,
@@ -792,6 +793,9 @@ class PrinterService {
       }
       if (cashierName != null && cashierName.isNotEmpty) {
         bytes += generator.text(formatTwoColumns('Kasir', cashierName));
+      }
+      if (customerName != null && customerName.isNotEmpty && customerName.toLowerCase() != 'umum') {
+        bytes += generator.text(formatTwoColumns('Pelanggan', customerName));
       }
       bytes += generator.text(dividerLine, styles: const PosStyles(align: PosAlign.center));
 
@@ -915,6 +919,7 @@ class PrinterService {
       orderNo: trx.invoiceNo,
       date: dateFormatted,
       cashierName: trx.cashierName,
+      customerName: trx.customerName,
       items: itemsFormatted,
       subtotal: formatRp(effectiveSubtotal),
       discount: trx.discountAmount > 0 ? formatRp(trx.discountAmount) : null,
@@ -1653,6 +1658,7 @@ class PrinterService {
     text('Waktu Buka : ${DateFormat('dd/MM/yy HH:mm').format(shift.openedAt)}\n');
     if (shift.closedAt != null) {
       text('Waktu Tutup: ${DateFormat('dd/MM/yy HH:mm').format(shift.closedAt!)}\n');
+      text('Durasi     : ${shift.formattedDuration}\n');
     }
     text('Status     : [ ${shift.status} ]\n');
     text('$subDivider\n');
@@ -1663,13 +1669,13 @@ class PrinterService {
       return formatTwoColumns(label, valStr, maxChars: width);
     }
 
-    text('${formatRow('Modal Awal (Kas)', shift.startingCash)}\n');
+    boldOn();
+    text('1. ARUS UANG TUNAI LACI:\n');
+    boldOff();
+    text('${formatRow('Modal Awal Kasir', shift.startingCash)}\n');
     text('${formatRow('Penjualan Tunai (+)', shift.totalCashSales)}\n');
-    if (shift.totalNonCashSales > 0) {
-      text('${formatRow('Non-Tunai / Kasbon', shift.totalNonCashSales)}\n');
-    }
-    text('${formatRow('Total Kas Masuk (+)', shift.totalCashIn)}\n');
-    text('${formatRow('Total Kas Keluar (-)', shift.totalCashOut)}\n');
+    text('${formatRow('Kas Masuk (+)', shift.totalCashIn)}\n');
+    text('${formatRow('Kas Keluar (-)', shift.totalCashOut)}\n');
     text('$subDivider\n');
 
     boldOn();
@@ -1678,13 +1684,27 @@ class PrinterService {
     boldOff();
 
     final diff = shift.cashDifference;
-    String diffLabel = 'Selisih (B - A)';
-    String diffStatus = '(PAS / SEIMBANG)';
-    if (diff > 0) diffStatus = '(LEBIH)';
-    if (diff < 0) diffStatus = '(KURANG)';
+    String diffStatus = '[PAS / SESUAI]';
+    if (diff > 0) diffStatus = '[LEBIH]';
+    if (diff < 0) diffStatus = '[KURANG]';
 
     boldOn();
-    text('${formatRow('$diffLabel $diffStatus', diff, prefix: diff > 0 ? '+' : '')}\n');
+    text('${formatRow('Selisih Kas $diffStatus', diff, prefix: diff > 0 ? '+' : '')}\n');
+    boldOff();
+
+    text('$subDivider\n');
+    boldOn();
+    text('2. ARUS NON-TUNAI:\n');
+    boldOff();
+    text('${formatRow('Penjualan QRIS', shift.totalQrisSales)}\n');
+    text('${formatRow('Kasbon / Piutang', shift.totalDebtSales)}\n');
+    if (shift.totalNonCashSales > 0 && (shift.totalNonCashSales - shift.totalQrisSales - shift.totalDebtSales).abs() > 0.01) {
+      text('${formatRow('Non-Tunai Lain', shift.totalNonCashSales - shift.totalQrisSales - shift.totalDebtSales)}\n');
+    }
+
+    text('$subDivider\n');
+    boldOn();
+    text('${formatRow('TOTAL OMSET PENJUALAN', shift.totalSales)}\n');
     boldOff();
 
     if (cashFlows.isNotEmpty) {

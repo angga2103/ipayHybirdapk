@@ -1,3 +1,4 @@
+import 'package:mobile_flutter/models/pos_customer.dart';
 import 'package:mobile_flutter/models/pos_shift.dart';
 import 'package:mobile_flutter/models/pos_cash_flow.dart';
 import 'package:mobile_flutter/models/pos_debt.dart';
@@ -611,4 +612,176 @@ void main() {
       expect(bytes.length, greaterThan(50));
     });
   });
+
+  group('PosCustomer & Customer Master Tests', () {
+    test('PosCustomer model parses and converts to Map correctly', () {
+      final now = DateTime.now();
+      final customer = PosCustomer(
+        id: 1,
+        name: 'Pak Haji Rohman',
+        phone: '081234567890',
+        address: 'Jl. Merdeka No. 45',
+        notes: 'Pelanggan setia warung sembako',
+        totalDebt: 75000,
+        activeDebtCount: 2,
+        totalSpent: 500000,
+        transactionCount: 15,
+        createdAt: now,
+        updatedAt: now,
+      );
+
+      expect(customer.displayName, equals('Pak Haji Rohman'));
+      expect(customer.hasActiveDebt, isTrue);
+      expect(customer.totalDebt, equals(75000));
+      expect(customer.activeDebtCount, equals(2));
+
+      final map = customer.toMap();
+      expect(map['name'], equals('Pak Haji Rohman'));
+      expect(map['phone'], equals('081234567890'));
+
+      final restored = PosCustomer.fromMap(map);
+      expect(restored.name, equals('Pak Haji Rohman'));
+      expect(restored.phone, equals('081234567890'));
+      expect(restored.address, equals('Jl. Merdeka No. 45'));
+    });
+
+    test('Customer without debt reports hasActiveDebt as false', () {
+      final now = DateTime.now();
+      final customer = PosCustomer(
+        name: 'Siti Aminah',
+        totalDebt: 0,
+        activeDebtCount: 0,
+        createdAt: now,
+        updatedAt: now,
+      );
+      expect(customer.hasActiveDebt, isFalse);
+    });
+
+    test('PosCustomer copyWith updates fields properly', () {
+      final now = DateTime.now();
+      final customer = PosCustomer(name: 'Andi', phone: '08111', createdAt: now, updatedAt: now);
+      final updated = customer.copyWith(name: 'Andi Saputra', totalDebt: 25000);
+      expect(updated.name, equals('Andi Saputra'));
+      expect(updated.phone, equals('08111'));
+      expect(updated.totalDebt, equals(25000));
+    });
+  });
+
+  group('Shift Management: Cash Drawer vs QRIS Cash Flow Tests', () {
+    test('Calculated physical expected cash excludes QRIS and Debt sales from cash drawer', () {
+      final shift = PosShift(
+        cashierName: 'Budi Kasir',
+        openedAt: DateTime.now(),
+        startingCash: 100000,   // Modal awal fisik di laci
+        totalCashSales: 450000, // Uang fisik dari transaksi tunai
+        totalQrisSales: 250000, // Non-tunai QRIS langsung ke bank (tidak di laci)
+        totalDebtSales: 50000,  // Kasbon piutang (belum ada uang fisik)
+        totalCashIn: 50000,     // Kas masuk fisik (tukar uang receh dari bos)
+        totalCashOut: 20000,    // Kas keluar fisik (beli token listrik/galon)
+      );
+
+      // Verifikasi: uang fisik laci kasir seharusnya = 100.000 + 450.000 + 50.000 - 20.000 = 580.000
+      expect(shift.calculatedExpectedCash, equals(580000));
+
+      // Verifikasi: Total omset penjualan toko = 450.000 (Tunai) + 250.000 (QRIS) + 50.000 (Kasbon) = 750.000
+      expect(shift.totalSales, equals(750000));
+    });
+
+    test('Shift difference calculation correctly flags PAS, LEBIH, dan KURANG', () {
+      // Kasus 1: Uang fisik pas
+      final shiftPas = PosShift(
+        cashierName: 'Budi',
+        openedAt: DateTime.now(),
+        startingCash: 100000,
+        expectedCash: 300000,
+        actualCash: 300000,
+        cashDifference: 0,
+      );
+      expect(shiftPas.cashDifference, equals(0));
+
+      // Kasus 2: Uang fisik kurang (selisih minus)
+      final shiftKurang = PosShift(
+        cashierName: 'Budi',
+        openedAt: DateTime.now(),
+        startingCash: 100000,
+        expectedCash: 300000,
+        actualCash: 280000,
+        cashDifference: -20000,
+      );
+      expect(shiftKurang.cashDifference, equals(-20000));
+
+      // Kasus 3: Uang fisik lebih
+      final shiftLebih = PosShift(
+        cashierName: 'Budi',
+        openedAt: DateTime.now(),
+        startingCash: 100000,
+        expectedCash: 300000,
+        actualCash: 310000,
+        cashDifference: 10000,
+      );
+      expect(shiftLebih.cashDifference, equals(10000));
+    });
+
+    test('Shift formatted duration outputs readable text', () {
+      final start = DateTime(2026, 11, 8, 8, 0);
+      final end = DateTime(2026, 11, 8, 16, 30);
+      final shift = PosShift(
+        cashierName: 'Kasir 1',
+        openedAt: start,
+        closedAt: end,
+      );
+      expect(shift.formattedDuration, equals('8 Jam 30 Mnt'));
+    });
+  });
+
+  group('PosTransaction Customer & Payment Method Tests', () {
+    test('Default transaction assigns customer as Umum', () {
+      final trx = PosTransaction(
+        invoiceNo: 'TRX-DEFAULT-001',
+        dateTime: DateTime.now(),
+        totalAmount: 50000,
+        cashPaid: 50000,
+        changeDue: 0,
+        paymentMethod: 'Tunai',
+        items: [],
+      );
+
+      expect(trx.customerName, equals('Umum'));
+      expect(trx.customerId, isNull);
+    });
+
+    test('Transaction preserves customer name, phone and shiftId', () {
+      final trx = PosTransaction(
+        invoiceNo: 'TRX-QRIS-002',
+        dateTime: DateTime.now(),
+        customerId: 5,
+        customerName: 'Ibu Ratna',
+        customerPhone: '081999888777',
+        shiftId: 12,
+        totalAmount: 125000,
+        cashPaid: 125000,
+        changeDue: 0,
+        paymentMethod: 'QRIS',
+        items: [],
+      );
+
+      expect(trx.customerId, equals(5));
+      expect(trx.customerName, equals('Ibu Ratna'));
+      expect(trx.customerPhone, equals('081999888777'));
+      expect(trx.shiftId, equals(12));
+      expect(trx.paymentMethod, equals('QRIS'));
+
+      final map = trx.toMap();
+      expect(map['customer_id'], equals(5));
+      expect(map['customer_name'], equals('Ibu Ratna'));
+      expect(map['payment_method'], equals('QRIS'));
+      expect(map['shift_id'], equals(12));
+
+      final restored = PosTransaction.fromMap(map);
+      expect(restored.customerName, equals('Ibu Ratna'));
+      expect(restored.paymentMethod, equals('QRIS'));
+      expect(restored.shiftId, equals(12));
+    });
+  });
+
 }

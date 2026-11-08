@@ -202,24 +202,24 @@ class AppUpdateService {
                   child: Column(
                     children: [
                       _buildWhatsNewItem(
-                        icon: Icons.schedule_rounded,
+                        icon: Icons.people_alt_rounded,
                         color: AppConfig.primaryTeal,
-                        title: 'Buka/Tutup Kasir (Shift) & Kas Operasional',
-                        desc: 'Catat modal awal, kas masuk/keluar petty cash, hitung selisih uang laci, dan cetak struk shift.',
+                        title: 'Master Pelanggan & Kasbon Lengkap',
+                        desc: 'Tab khusus data pelanggan & kasbon. Pilih nama pelanggan saat transaksi kasir (default nama: "Umum").',
                       ),
                       const Divider(height: 14, color: Color(0xFFE2E8F0)),
                       _buildWhatsNewItem(
-                        icon: Icons.print_rounded,
+                        icon: Icons.point_of_sale_rounded,
                         color: Colors.indigo,
-                        title: 'Cetak Label Barcode Thermal',
-                        desc: 'Cetak stiker barcode / QR code produk langsung ke printer thermal Bluetooth.',
+                        title: 'Buka & Tutup Kasir (Shift) Transparan',
+                        desc: 'Tercatat jam buka/tutup kasir, nama kasir bertugas, dan pemisahan arus uang fisik laci kasir vs QRIS & kasbon.',
                       ),
                       const Divider(height: 14, color: Color(0xFFE2E8F0)),
                       _buildWhatsNewItem(
-                        icon: Icons.menu_book_rounded,
+                        icon: Icons.cleaning_services_rounded,
                         color: Colors.purple,
-                        title: 'Buku Kasbon / Piutang Warung',
-                        desc: 'Metode bayar kasbon di kasir, pencatatan jatuh tempo, cicilan pelunasan, dan kirim tagihan WA.',
+                        title: 'Pembersihan Navbar Atas',
+                        desc: 'Pembersihan icon update ganda di header navbar atas agar tampilan lebih ringkas, lega, dan bersih.',
                       ),
                       const Divider(height: 14, color: Color(0xFFE2E8F0)),
                       _buildWhatsNewItem(

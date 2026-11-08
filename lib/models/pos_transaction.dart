@@ -156,6 +156,10 @@ class PosTransaction {
   final String? cashierName;
   final String? note;
   final String status; // 'COMPLETED', 'PARTIAL_RETURN', 'CANCELLED'
+  final int? customerId;
+  final String customerName;
+  final String? customerPhone;
+  final int? shiftId;
   final List<PosTransactionItem> items;
   final List<PosTransactionReturn> returns;
 
@@ -174,6 +178,10 @@ class PosTransaction {
     this.cashierName = 'Kasir',
     this.note,
     this.status = 'COMPLETED',
+    this.customerId,
+    this.customerName = 'Umum',
+    this.customerPhone,
+    this.shiftId,
     this.items = const [],
     this.returns = const [],
   });
@@ -201,6 +209,10 @@ class PosTransaction {
       'cashier_name': cashierName ?? 'Kasir',
       'note': note,
       'status': status,
+      'customer_id': customerId,
+      'customer_name': customerName,
+      'customer_phone': customerPhone,
+      'shift_id': shiftId,
     };
   }
 
@@ -224,6 +236,10 @@ class PosTransaction {
       cashierName: map['cashier_name']?.toString() ?? 'Kasir',
       note: map['note']?.toString(),
       status: map['status']?.toString() ?? 'COMPLETED',
+      customerId: map['customer_id'] as int?,
+      customerName: map['customer_name']?.toString() ?? 'Umum',
+      customerPhone: map['customer_phone']?.toString(),
+      shiftId: map['shift_id'] as int?,
       items: items,
       returns: returns,
     );

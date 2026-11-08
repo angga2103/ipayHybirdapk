@@ -9,6 +9,8 @@ class PosShift {
   final double actualCash;
   final double cashDifference;
   final double totalCashSales;
+  final double totalQrisSales;
+  final double totalDebtSales;
   final double totalNonCashSales;
   final double totalCashIn;
   final double totalCashOut;
@@ -26,6 +28,8 @@ class PosShift {
     this.actualCash = 0.0,
     this.cashDifference = 0.0,
     this.totalCashSales = 0.0,
+    this.totalQrisSales = 0.0,
+    this.totalDebtSales = 0.0,
     this.totalNonCashSales = 0.0,
     this.totalCashIn = 0.0,
     this.totalCashOut = 0.0,
@@ -36,8 +40,28 @@ class PosShift {
 
   bool get isOpen => status == 'OPEN';
 
+  /// Total seluruh penjualan (omset kotor) yang terjadi selama shift
+  double get totalSales => totalCashSales + totalQrisSales + totalDebtSales + totalNonCashSales;
+
+  /// Uang tunai laci kasir fisik yang seharusnya ada
+  /// (HANYA menghitung Modal Awal + Penjualan Tunai + Kas Masuk - Kas Keluar)
+  /// QRIS tidak masuk laci fisik karena langsung masuk rekening/e-wallet.
+  /// Kasbon tidak masuk laci fisik karena belum dibayar (piutang).
   double get calculatedExpectedCash =>
       startingCash + totalCashSales + totalCashIn - totalCashOut;
+
+  /// Durasi shift berjalan
+  Duration get shiftDuration => (closedAt ?? DateTime.now()).difference(openedAt);
+
+  String get formattedDuration {
+    final d = shiftDuration;
+    final h = d.inHours;
+    final m = d.inMinutes.remainder(60);
+    if (h > 0) {
+      return '$h Jam $m Mnt';
+    }
+    return '$m Menit';
+  }
 
   Map<String, dynamic> toMap() {
     return {
@@ -50,6 +74,8 @@ class PosShift {
       'actual_cash': actualCash,
       'cash_difference': cashDifference,
       'total_cash_sales': totalCashSales,
+      'total_qris_sales': totalQrisSales,
+      'total_debt_sales': totalDebtSales,
       'total_non_cash_sales': totalNonCashSales,
       'total_cash_in': totalCashIn,
       'total_cash_out': totalCashOut,
@@ -70,6 +96,8 @@ class PosShift {
       actualCash: (map['actual_cash'] as num?)?.toDouble() ?? 0.0,
       cashDifference: (map['cash_difference'] as num?)?.toDouble() ?? 0.0,
       totalCashSales: (map['total_cash_sales'] as num?)?.toDouble() ?? 0.0,
+      totalQrisSales: (map['total_qris_sales'] as num?)?.toDouble() ?? 0.0,
+      totalDebtSales: (map['total_debt_sales'] as num?)?.toDouble() ?? 0.0,
       totalNonCashSales: (map['total_non_cash_sales'] as num?)?.toDouble() ?? 0.0,
       totalCashIn: (map['total_cash_in'] as num?)?.toDouble() ?? 0.0,
       totalCashOut: (map['total_cash_out'] as num?)?.toDouble() ?? 0.0,
@@ -89,6 +117,8 @@ class PosShift {
     double? actualCash,
     double? cashDifference,
     double? totalCashSales,
+    double? totalQrisSales,
+    double? totalDebtSales,
     double? totalNonCashSales,
     double? totalCashIn,
     double? totalCashOut,
@@ -106,6 +136,8 @@ class PosShift {
       actualCash: actualCash ?? this.actualCash,
       cashDifference: cashDifference ?? this.cashDifference,
       totalCashSales: totalCashSales ?? this.totalCashSales,
+      totalQrisSales: totalQrisSales ?? this.totalQrisSales,
+      totalDebtSales: totalDebtSales ?? this.totalDebtSales,
       totalNonCashSales: totalNonCashSales ?? this.totalNonCashSales,
       totalCashIn: totalCashIn ?? this.totalCashIn,
       totalCashOut: totalCashOut ?? this.totalCashOut,

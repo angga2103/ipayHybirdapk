@@ -1,3 +1,4 @@
+import '../models/pos_customer.dart';
 import 'package:path/path.dart';
 import 'package:sqflite/sqflite.dart';
 import '../models/pos_cart_item.dart';
@@ -63,7 +64,7 @@ class PosDatabaseService {
 
     return await openDatabase(
       path,
-      version: 5,
+      version: 6,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -113,7 +114,11 @@ class PosDatabaseService {
             payment_method TEXT NOT NULL DEFAULT 'Tunai',
             cashier_name TEXT NOT NULL DEFAULT 'Kasir',
             note TEXT,
-            status TEXT NOT NULL DEFAULT 'COMPLETED'
+            status TEXT NOT NULL DEFAULT 'COMPLETED',
+            customer_id INTEGER,
+            customer_name TEXT NOT NULL DEFAULT 'Umum',
+            customer_phone TEXT,
+            shift_id INTEGER
           );
         ''');
         await db.execute('CREATE INDEX idx_trx_invoice ON pos_transactions(invoice_no);');
@@ -216,6 +221,8 @@ class PosDatabaseService {
             actual_cash REAL NOT NULL DEFAULT 0,
             cash_difference REAL NOT NULL DEFAULT 0,
             total_cash_sales REAL NOT NULL DEFAULT 0,
+            total_qris_sales REAL NOT NULL DEFAULT 0,
+            total_debt_sales REAL NOT NULL DEFAULT 0,
             total_non_cash_sales REAL NOT NULL DEFAULT 0,
             total_cash_in REAL NOT NULL DEFAULT 0,
             total_cash_out REAL NOT NULL DEFAULT 0,
@@ -241,11 +248,27 @@ class PosDatabaseService {
           );
         ''');
 
-        // 10. Tabel Kasbon / Hutang Pelanggan (Piutang Warung)
+        // 10. Tabel Master Data Pelanggan Toko
+        await db.execute('''
+          CREATE TABLE pos_customers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL,
+            phone TEXT,
+            address TEXT,
+            notes TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+          );
+        ''');
+        await db.execute('CREATE INDEX idx_customers_name ON pos_customers(name);');
+        await db.execute('CREATE INDEX idx_customers_phone ON pos_customers(phone);');
+
+        // 11. Tabel Kasbon / Hutang Pelanggan (Piutang Warung)
         await db.execute('''
           CREATE TABLE pos_customer_debts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             transaction_id INTEGER,
+            customer_id INTEGER,
             invoice_no TEXT NOT NULL,
             customer_name TEXT NOT NULL,
             customer_phone TEXT,
@@ -444,6 +467,48 @@ class PosDatabaseService {
                 FOREIGN KEY (debt_id) REFERENCES pos_customer_debts (id) ON DELETE CASCADE
               );
             ''');
+          } catch (_) {}
+        }
+
+        if (oldVersion < 6) {
+          try {
+            await db.execute('''
+              CREATE TABLE IF NOT EXISTS pos_customers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                phone TEXT,
+                address TEXT,
+                notes TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+              );
+            ''');
+            await db.execute('CREATE INDEX IF NOT EXISTS idx_customers_name ON pos_customers(name);');
+            await db.execute('CREATE INDEX IF NOT EXISTS idx_customers_phone ON pos_customers(phone);');
+          } catch (_) {}
+
+          try {
+            await db.execute('ALTER TABLE pos_transactions ADD COLUMN customer_id INTEGER;');
+          } catch (_) {}
+          try {
+            await db.execute("ALTER TABLE pos_transactions ADD COLUMN customer_name TEXT DEFAULT 'Umum';");
+          } catch (_) {}
+          try {
+            await db.execute('ALTER TABLE pos_transactions ADD COLUMN customer_phone TEXT;');
+          } catch (_) {}
+          try {
+            await db.execute('ALTER TABLE pos_transactions ADD COLUMN shift_id INTEGER;');
+          } catch (_) {}
+
+          try {
+            await db.execute('ALTER TABLE pos_customer_debts ADD COLUMN customer_id INTEGER;');
+          } catch (_) {}
+
+          try {
+            await db.execute('ALTER TABLE pos_shifts ADD COLUMN total_qris_sales REAL NOT NULL DEFAULT 0;');
+          } catch (_) {}
+          try {
+            await db.execute('ALTER TABLE pos_shifts ADD COLUMN total_debt_sales REAL NOT NULL DEFAULT 0;');
           } catch (_) {}
         }
       },
@@ -700,6 +765,10 @@ class PosDatabaseService {
     String paymentMethod = 'Tunai',
     String cashierName = 'Kasir',
     String? note,
+    int? customerId,
+    String customerName = 'Umum',
+    String? customerPhone,
+    int? shiftId,
   }) async {
     final db = await database;
 
@@ -736,6 +805,10 @@ class PosDatabaseService {
       cashierName: cashierName,
       note: note,
       status: 'COMPLETED',
+      customerId: customerId,
+      customerName: customerName.trim().isEmpty ? 'Umum' : customerName.trim(),
+      customerPhone: customerPhone?.trim(),
+      shiftId: shiftId,
     );
 
     int trxId = 0;
@@ -827,6 +900,10 @@ class PosDatabaseService {
       cashierName: trx.cashierName,
       note: trx.note,
       status: 'COMPLETED',
+      customerId: trx.customerId,
+      customerName: trx.customerName,
+      customerPhone: trx.customerPhone,
+      shiftId: trx.shiftId,
       items: savedItems,
       returns: [],
     );
@@ -1351,14 +1428,19 @@ class PosDatabaseService {
       SELECT 
         COUNT(*) as total_trx,
         SUM(CASE WHEN payment_method = 'Tunai' THEN total_amount ELSE 0 END) as cash_sales,
-        SUM(CASE WHEN payment_method != 'Tunai' THEN total_amount ELSE 0 END) as non_cash_sales
+        SUM(CASE WHEN payment_method = 'QRIS' THEN total_amount ELSE 0 END) as qris_sales,
+        SUM(CASE WHEN payment_method = 'Kasbon' THEN total_amount ELSE 0 END) as debt_sales,
+        SUM(CASE WHEN payment_method NOT IN ('Tunai', 'QRIS', 'Kasbon') THEN total_amount ELSE 0 END) as other_non_cash_sales
       FROM pos_transactions
-      WHERE date_time >= ? AND status != 'CANCELLED'
-    ''', [currentShift.openedAt.toIso8601String()]);
+      WHERE (shift_id = ? OR (shift_id IS NULL AND date_time >= ?)) AND status != 'CANCELLED'
+    ''', [shiftId, currentShift.openedAt.toIso8601String()]);
 
     final totalTrx = (trxRes.first['total_trx'] as int?) ?? 0;
     final cashSales = (trxRes.first['cash_sales'] as num?)?.toDouble() ?? 0.0;
-    final nonCashSales = (trxRes.first['non_cash_sales'] as num?)?.toDouble() ?? 0.0;
+    final qrisSales = (trxRes.first['qris_sales'] as num?)?.toDouble() ?? 0.0;
+    final debtSales = (trxRes.first['debt_sales'] as num?)?.toDouble() ?? 0.0;
+    final otherNonCash = (trxRes.first['other_non_cash_sales'] as num?)?.toDouble() ?? 0.0;
+    final nonCashSales = qrisSales + debtSales + otherNonCash;
 
     // Hitung kas masuk & kas keluar
     final flowRes = await db.rawQuery('''
@@ -1381,6 +1463,8 @@ class PosDatabaseService {
       status: 'CLOSED',
       totalTransactions: totalTrx,
       totalCashSales: cashSales,
+      totalQrisSales: qrisSales,
+      totalDebtSales: debtSales,
       totalNonCashSales: nonCashSales,
       totalCashIn: cashIn,
       totalCashOut: cashOut,
@@ -1451,6 +1535,7 @@ class PosDatabaseService {
 
   Future<PosCustomerDebt> recordCustomerDebt({
     int? transactionId,
+    int? customerId,
     required String invoiceNo,
     required String customerName,
     String? customerPhone,
@@ -1459,8 +1544,27 @@ class PosDatabaseService {
     String? notes,
   }) async {
     final db = await database;
+
+    // Otomatis sinkronisasi ke tabel master pos_customers jika nama baru
+    int? finalCustomerId = customerId;
+    final cleanName = customerName.trim();
+    if (finalCustomerId == null && cleanName.isNotEmpty && cleanName.toLowerCase() != 'umum') {
+      final existing = await db.query('pos_customers', where: 'LOWER(name) = ?', whereArgs: [cleanName.toLowerCase()]);
+      if (existing.isNotEmpty) {
+        finalCustomerId = existing.first['id'] as int?;
+      } else {
+        final nowStr = DateTime.now().toIso8601String();
+        finalCustomerId = await db.insert('pos_customers', {
+          'name': cleanName,
+          'phone': customerPhone?.trim(),
+          'created_at': nowStr,
+          'updated_at': nowStr,
+        });
+      }
+    }
     final debt = PosCustomerDebt(
       transactionId: transactionId,
+      customerId: finalCustomerId,
       invoiceNo: invoiceNo,
       customerName: customerName.trim(),
       customerPhone: customerPhone?.trim(),
@@ -1599,5 +1703,95 @@ class PosDatabaseService {
       'total_unpaid': totalUnpaid,
       'total_paid': totalPaid,
     };
+  }
+
+  // ==========================================
+  // MASTER DATA PELANGGAN (CUSTOMER MANAGEMENT)
+  // ==========================================
+
+  Future<List<PosCustomer>> getCustomers({String? searchQuery}) async {
+    final db = await database;
+    String sql = '''
+      SELECT 
+        c.*,
+        COALESCE(debt_agg.total_debt, 0) as total_debt,
+        COALESCE(debt_agg.active_debt_count, 0) as active_debt_count,
+        COALESCE(trx_agg.total_spent, 0) as total_spent,
+        COALESCE(trx_agg.transaction_count, 0) as transaction_count
+      FROM pos_customers c
+      LEFT JOIN (
+        SELECT 
+          COALESCE(customer_id, 0) as cid,
+          customer_name,
+          SUM(remaining_amount) as total_debt,
+          COUNT(*) as active_debt_count
+        FROM pos_customer_debts
+        WHERE status != 'PAID'
+        GROUP BY customer_id, customer_name
+      ) debt_agg ON (debt_agg.cid = c.id OR (debt_agg.cid = 0 AND LOWER(debt_agg.customer_name) = LOWER(c.name)))
+      LEFT JOIN (
+        SELECT 
+          COALESCE(customer_id, 0) as cid,
+          customer_name,
+          SUM(total_amount) as total_spent,
+          COUNT(*) as transaction_count
+        FROM pos_transactions
+        WHERE status != 'CANCELLED'
+        GROUP BY customer_id, customer_name
+      ) trx_agg ON (trx_agg.cid = c.id OR (trx_agg.cid = 0 AND LOWER(trx_agg.customer_name) = LOWER(c.name)))
+    ''';
+
+    List<dynamic> args = [];
+    if (searchQuery != null && searchQuery.trim().isNotEmpty) {
+      final q = '%${searchQuery.trim()}%';
+      sql += ' WHERE c.name LIKE ? OR c.phone LIKE ? OR c.address LIKE ?';
+      args = [q, q, q];
+    }
+    sql += ' ORDER BY c.name COLLATE NOCASE ASC';
+
+    final rows = await db.rawQuery(sql, args);
+    return rows.map((r) => PosCustomer.fromMap(r)).toList();
+  }
+
+  Future<PosCustomer?> getCustomerById(int id) async {
+    final db = await database;
+    final rows = await db.query('pos_customers', where: 'id = ?', whereArgs: [id]);
+    if (rows.isEmpty) return null;
+    return PosCustomer.fromMap(rows.first);
+  }
+
+  Future<int> insertCustomer(PosCustomer customer) async {
+    final db = await database;
+    final now = DateTime.now().toIso8601String();
+    return await db.insert('pos_customers', {
+      'name': customer.name.trim(),
+      'phone': customer.phone?.trim(),
+      'address': customer.address?.trim(),
+      'notes': customer.notes?.trim(),
+      'created_at': now,
+      'updated_at': now,
+    });
+  }
+
+  Future<int> updateCustomer(PosCustomer customer) async {
+    if (customer.id == null) return 0;
+    final db = await database;
+    return await db.update(
+      'pos_customers',
+      {
+        'name': customer.name.trim(),
+        'phone': customer.phone?.trim(),
+        'address': customer.address?.trim(),
+        'notes': customer.notes?.trim(),
+        'updated_at': DateTime.now().toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: [customer.id],
+    );
+  }
+
+  Future<int> deleteCustomer(int id) async {
+    final db = await database;
+    return await db.delete('pos_customers', where: 'id = ?', whereArgs: [id]);
   }
 }

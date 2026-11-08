@@ -2,6 +2,7 @@
 class PosCustomerDebt {
   final int? id;
   final int? transactionId;
+  final int? customerId;
   final String invoiceNo;
   final String customerName;
   final String? customerPhone;
@@ -18,6 +19,7 @@ class PosCustomerDebt {
   PosCustomerDebt({
     this.id,
     this.transactionId,
+    this.customerId,
     required this.invoiceNo,
     required this.customerName,
     this.customerPhone,
@@ -48,6 +50,7 @@ class PosCustomerDebt {
     return {
       if (id != null) 'id': id,
       'transaction_id': transactionId,
+      'customer_id': customerId,
       'invoice_no': invoiceNo,
       'customer_name': customerName,
       'customer_phone': customerPhone,
@@ -66,6 +69,7 @@ class PosCustomerDebt {
     return PosCustomerDebt(
       id: map['id'] as int?,
       transactionId: map['transaction_id'] as int?,
+      customerId: map['customer_id'] as int?,
       invoiceNo: (map['invoice_no'] as String?) ?? '',
       customerName: (map['customer_name'] as String?) ?? 'Pelanggan',
       customerPhone: map['customer_phone'] as String?,

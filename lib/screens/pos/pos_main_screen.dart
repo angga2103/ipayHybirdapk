@@ -1,3 +1,4 @@
+import '../../models/pos_customer.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -39,7 +40,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 4, vsync: this);
+    _tabController = TabController(length: 5, vsync: this);
   }
 
   @override
@@ -96,11 +97,11 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
           ],
         ),
         actions: [
-          // Tombol Cek Pembaruan APK
+          // Tombol Pintas Master Data Pelanggan
           IconButton(
-            icon: const Icon(Icons.system_update_rounded, color: AppConfig.primaryTeal, size: 21),
-            tooltip: 'Cek Pembaruan APK',
-            onPressed: () => AppUpdateService().checkForUpdate(context, silent: false),
+            icon: const Icon(Icons.people_alt_rounded, color: AppConfig.primaryTeal, size: 22),
+            tooltip: 'Data Pelanggan & Kasbon',
+            onPressed: () => _tabController.animateTo(1),
           ),
           // Indikator Status Printer
           InkWell(
@@ -140,16 +141,6 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
               ),
             ),
           ),
-          // Tombol Periksa Pembaruan Aplikasi
-          IconButton(
-            icon: const Icon(Icons.cloud_sync_outlined, size: 21, color: AppConfig.primaryTeal),
-            tooltip: 'Periksa Pembaruan Versi Baru',
-            padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
-            onPressed: () {
-              AppUpdateService().checkForUpdate(context, silent: false);
-            },
-          ),
           const SizedBox(width: 4),
         ],
         bottom: TabBar(
@@ -162,6 +153,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
           unselectedLabelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
           tabs: const [
             Tab(icon: Icon(Icons.point_of_sale, size: 20), text: 'Kasir'),
+            Tab(icon: Icon(Icons.people_alt_outlined, size: 20), text: 'Pelanggan'),
             Tab(icon: Icon(Icons.handshake_outlined, size: 20), text: 'Konsinyasi'),
             Tab(icon: Icon(Icons.table_view, size: 20), text: 'Produk/Excel'),
             Tab(icon: Icon(Icons.receipt_long, size: 20), text: 'Riwayat/Laba'),
@@ -172,6 +164,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
         controller: _tabController,
         children: [
           _buildCashierTab(pos),
+          _buildCustomersTab(pos),
           _buildConsignmentTab(pos),
           _buildProductExcelTab(pos),
           _buildHistoryReportTab(pos),
@@ -192,6 +185,9 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
           children: [
             // Status Shift Kasir & Modal Awal
             _buildShiftStatusBar(pos),
+
+            // Bar Pemilih Pelanggan Aktif Kasir
+            _buildCustomerSelectorBar(pos),
 
             // 1. Search Bar & Category Filter
             Container(
@@ -1326,12 +1322,16 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
     );
   }
 
-  // Modal Pembayaran & Cetak Struk (Tunai & Kasbon)
+  // Modal Pembayaran & Cetak Struk (Tunai, QRIS, & Kasbon)
   void _openPaymentModal(BuildContext context, PosProvider pos) {
     final total = pos.cartTotal;
     final cashCtrl = TextEditingController(text: total.toInt().toString());
-    final customerNameCtrl = TextEditingController();
-    final customerPhoneCtrl = TextEditingController();
+    final customerNameCtrl = TextEditingController(
+      text: pos.selectedCustomer != null ? pos.selectedCustomer!.name : '',
+    );
+    final customerPhoneCtrl = TextEditingController(
+      text: pos.selectedCustomer != null ? (pos.selectedCustomer!.phone ?? '') : '',
+    );
     final debtNoteCtrl = TextEditingController();
     String paymentMethod = 'Tunai';
     int dueDays = 7;
@@ -1345,9 +1345,8 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
           builder: (modalCtx, setPaymentState) {
             final cashPaid = double.tryParse(cashCtrl.text) ?? total;
             final change = cashPaid - total;
-            final isTunai = paymentMethod == 'Tunai';
 
-            // Tombol Uang Pas Cepat
+            // Tombol Uang Pas Cepat (khusus Tunai)
             final quickOptions = [
               total,
               (total / 10000).ceil() * 10000.0,
@@ -1377,7 +1376,11 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
-                          isTunai ? 'Pembayaran Kasir (Tunai)' : 'Catat Kasbon / Piutang Warung',
+                          paymentMethod == 'Tunai'
+                              ? 'Pembayaran Kasir (Tunai)'
+                              : paymentMethod == 'QRIS'
+                                  ? 'Pembayaran Non-Tunai (QRIS)'
+                                  : 'Catat Kasbon / Piutang Warung',
                           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900),
                         ),
                         IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(pCtx)),
@@ -1385,7 +1388,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                     ),
                     const SizedBox(height: 8),
 
-                    // Toggle Tunai vs Kasbon
+                    // Segmented Button 3 Pilihan: Tunai, QRIS, Kasbon
                     Container(
                       padding: const EdgeInsets.all(4),
                       decoration: BoxDecoration(
@@ -1401,21 +1404,58 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                               child: Container(
                                 padding: const EdgeInsets.symmetric(vertical: 8),
                                 decoration: BoxDecoration(
-                                  color: isTunai ? Colors.white : Colors.transparent,
+                                  color: paymentMethod == 'Tunai' ? Colors.white : Colors.transparent,
                                   borderRadius: BorderRadius.circular(10),
-                                  boxShadow: isTunai ? [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 4)] : null,
+                                  boxShadow: paymentMethod == 'Tunai'
+                                      ? [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 4)]
+                                      : null,
                                 ),
                                 child: Row(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    Icon(Icons.payments_outlined, size: 16, color: isTunai ? AppConfig.primaryTeal : const Color(0xFF64748B)),
-                                    const SizedBox(width: 6),
+                                    Icon(Icons.payments_outlined,
+                                        size: 15,
+                                        color: paymentMethod == 'Tunai' ? AppConfig.primaryTeal : const Color(0xFF64748B)),
+                                    const SizedBox(width: 4),
                                     Text(
-                                      'Tunai / Cash',
+                                      'Tunai',
                                       style: TextStyle(
                                         fontSize: 12,
                                         fontWeight: FontWeight.bold,
-                                        color: isTunai ? AppConfig.primaryTeal : const Color(0xFF64748B),
+                                        color: paymentMethod == 'Tunai' ? AppConfig.primaryTeal : const Color(0xFF64748B),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                          Expanded(
+                            child: InkWell(
+                              onTap: () => setPaymentState(() => paymentMethod = 'QRIS'),
+                              borderRadius: BorderRadius.circular(10),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(vertical: 8),
+                                decoration: BoxDecoration(
+                                  color: paymentMethod == 'QRIS' ? Colors.white : Colors.transparent,
+                                  borderRadius: BorderRadius.circular(10),
+                                  boxShadow: paymentMethod == 'QRIS'
+                                      ? [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 4)]
+                                      : null,
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(Icons.qr_code_2_rounded,
+                                        size: 15,
+                                        color: paymentMethod == 'QRIS' ? Colors.blue.shade700 : const Color(0xFF64748B)),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      'QRIS',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                        color: paymentMethod == 'QRIS' ? Colors.blue.shade700 : const Color(0xFF64748B),
                                       ),
                                     ),
                                   ],
@@ -1430,21 +1470,25 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                               child: Container(
                                 padding: const EdgeInsets.symmetric(vertical: 8),
                                 decoration: BoxDecoration(
-                                  color: !isTunai ? Colors.white : Colors.transparent,
+                                  color: paymentMethod == 'Kasbon' ? Colors.white : Colors.transparent,
                                   borderRadius: BorderRadius.circular(10),
-                                  boxShadow: !isTunai ? [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 4)] : null,
+                                  boxShadow: paymentMethod == 'Kasbon'
+                                      ? [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 4)]
+                                      : null,
                                 ),
                                 child: Row(
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
-                                    Icon(Icons.menu_book_rounded, size: 16, color: !isTunai ? Colors.purple : const Color(0xFF64748B)),
-                                    const SizedBox(width: 6),
+                                    Icon(Icons.menu_book_rounded,
+                                        size: 15,
+                                        color: paymentMethod == 'Kasbon' ? Colors.purple : const Color(0xFF64748B)),
+                                    const SizedBox(width: 4),
                                     Text(
-                                      'Kasbon / Hutang',
+                                      'Kasbon',
                                       style: TextStyle(
                                         fontSize: 12,
                                         fontWeight: FontWeight.bold,
-                                        color: !isTunai ? Colors.purple : const Color(0xFF64748B),
+                                        color: paymentMethod == 'Kasbon' ? Colors.purple : const Color(0xFF64748B),
                                       ),
                                     ),
                                   ],
@@ -1462,14 +1506,26 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                       width: double.infinity,
                       padding: const EdgeInsets.all(14),
                       decoration: BoxDecoration(
-                        color: (isTunai ? AppConfig.primaryTeal : Colors.purple).withValues(alpha: 0.08),
+                        color: (paymentMethod == 'Tunai'
+                                ? AppConfig.primaryTeal
+                                : paymentMethod == 'QRIS'
+                                    ? Colors.blue.shade700
+                                    : Colors.purple)
+                            .withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: (isTunai ? AppConfig.primaryTeal : Colors.purple).withValues(alpha: 0.2)),
+                        border: Border.all(
+                          color: (paymentMethod == 'Tunai'
+                                  ? AppConfig.primaryTeal
+                                  : paymentMethod == 'QRIS'
+                                      ? Colors.blue.shade700
+                                      : Colors.purple)
+                              .withValues(alpha: 0.2),
+                        ),
                       ),
                       child: Column(
                         children: [
                           Text(
-                            isTunai ? 'TOTAL HARUS DIBAYAR' : 'TOTAL KASBON / PIUTANG',
+                            paymentMethod == 'Kasbon' ? 'TOTAL KASBON / PIUTANG' : 'TOTAL HARUS DIBAYAR',
                             style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF64748B)),
                           ),
                           Text(
@@ -1477,14 +1533,23 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                             style: TextStyle(
                               fontSize: 26,
                               fontWeight: FontWeight.w900,
-                              color: isTunai ? AppConfig.primaryTeal : Colors.purple.shade700,
+                              color: paymentMethod == 'Tunai'
+                                  ? AppConfig.primaryTeal
+                                  : paymentMethod == 'QRIS'
+                                      ? Colors.blue.shade700
+                                      : Colors.purple.shade700,
                             ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Pelanggan: ${pos.effectiveCustomerName}',
+                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF475569)),
                           ),
                         ],
                       ),
                     ),
 
-                    if (isTunai) ...[
+                    if (paymentMethod == 'Tunai') ...[
                       const SizedBox(height: 14),
                       const Text('Uang Diterima dari Pelanggan:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 6),
@@ -1542,6 +1607,45 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                                 fontSize: 16,
                                 fontWeight: FontWeight.w900,
                                 color: change < 0 ? Colors.red.shade700 : const Color(0xFF047857),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ] else if (paymentMethod == 'QRIS') ...[
+                      const SizedBox(height: 14),
+                      Container(
+                        padding: const EdgeInsets.all(14),
+                        decoration: BoxDecoration(
+                          color: Colors.blue.shade50,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(color: Colors.blue.shade200),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: Colors.blue.shade700,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: const Icon(Icons.qr_code_2, color: Colors.white, size: 28),
+                            ),
+                            const SizedBox(width: 12),
+                            const Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'Pembayaran Scan QRIS',
+                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF0F172A)),
+                                  ),
+                                  SizedBox(height: 2),
+                                  Text(
+                                    'Minta pembeli scan barcode QRIS toko. Pembayaran uang pas langsung masuk ke saldo rekening/e-wallet.',
+                                    style: TextStyle(fontSize: 11, color: Color(0xFF475569)),
+                                  ),
+                                ],
                               ),
                             ),
                           ],
@@ -1631,41 +1735,64 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                             child: ElevatedButton.icon(
                               icon: const Icon(Icons.print, size: 18),
                               label: Text(
-                                isTunai ? 'Bayar & Cetak Struk' : 'Catat & Cetak Nota Kasbon',
+                                paymentMethod == 'Tunai'
+                                    ? 'Bayar & Cetak Struk'
+                                    : paymentMethod == 'QRIS'
+                                        ? 'Simpan & Cetak QRIS'
+                                        : 'Catat & Cetak Kasbon',
                                 style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w900),
                               ),
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: isTunai ? AppConfig.primaryTeal : Colors.purple,
+                                backgroundColor: paymentMethod == 'Tunai'
+                                    ? AppConfig.primaryTeal
+                                    : paymentMethod == 'QRIS'
+                                        ? Colors.blue.shade700
+                                        : Colors.purple,
                                 foregroundColor: Colors.white,
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                               ),
-                              onPressed: (isTunai && change < 0)
+                              onPressed: (paymentMethod == 'Tunai' && change < 0)
                                   ? null
                                   : () async {
-                                      if (!isTunai && customerNameCtrl.text.trim().isEmpty) {
+                                      final isDebt = paymentMethod == 'Kasbon';
+                                      if (isDebt && customerNameCtrl.text.trim().isEmpty) {
                                         ScaffoldMessenger.of(modalCtx).showSnackBar(
-                                          const SnackBar(content: Text('⚠️ Nama pelanggan kasbon wajib diisi!'), backgroundColor: Colors.red),
+                                          const SnackBar(
+                                            content: Text('⚠️ Nama pelanggan kasbon wajib diisi!'),
+                                            backgroundColor: Colors.red,
+                                          ),
                                         );
                                         return;
                                       }
                                       Navigator.pop(pCtx);
-                                      final dueDate = dueDays > 0 ? DateTime.now().add(Duration(days: dueDays)) : null;
+                                      final dueDate = (isDebt && dueDays > 0)
+                                          ? DateTime.now().add(Duration(days: dueDays))
+                                          : null;
                                       final trx = await pos.checkout(
-                                        cashPaid: isTunai ? cashPaid : 0.0,
-                                        paymentMethod: isTunai ? 'Tunai' : 'Kasbon',
-                                        customerName: !isTunai ? customerNameCtrl.text.trim() : null,
-                                        customerPhone: !isTunai ? customerPhoneCtrl.text.trim() : null,
-                                        dueDate: !isTunai ? dueDate : null,
-                                        note: !isTunai ? debtNoteCtrl.text.trim() : null,
+                                        cashPaid: paymentMethod == 'Tunai' ? cashPaid : total,
+                                        paymentMethod: paymentMethod,
+                                        customerId: isDebt ? null : pos.selectedCustomer?.id,
+                                        customerName: isDebt
+                                            ? customerNameCtrl.text.trim()
+                                            : pos.effectiveCustomerName,
+                                        customerPhone: isDebt
+                                            ? customerPhoneCtrl.text.trim()
+                                            : pos.selectedCustomer?.phone,
+                                        dueDate: dueDate,
+                                        note: isDebt ? debtNoteCtrl.text.trim() : null,
                                         autoPrint: true,
                                       );
                                       if (trx != null && context.mounted) {
                                         ScaffoldMessenger.of(context).showSnackBar(
                                           SnackBar(
-                                            content: Text(isTunai
-                                                ? '✅ Nota ${trx.invoiceNo} tersimpan dan dicetak!'
-                                                : '✅ Kasbon atas nama ${customerNameCtrl.text.trim()} tercatat dan dicetak!'),
-                                            backgroundColor: isTunai ? AppConfig.primaryTeal : Colors.purple,
+                                            content: Text(isDebt
+                                                ? '✅ Kasbon atas nama ${customerNameCtrl.text.trim()} tercatat dan dicetak!'
+                                                : '✅ Transaksi ${trx.invoiceNo} tersimpan dan dicetak!'),
+                                            backgroundColor: isDebt
+                                                ? Colors.purple
+                                                : paymentMethod == 'QRIS'
+                                                    ? Colors.blue.shade700
+                                                    : AppConfig.primaryTeal,
                                           ),
                                         );
                                       }
@@ -1677,32 +1804,43 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                         SizedBox(
                           height: 48,
                           child: OutlinedButton(
-                            onPressed: (isTunai && change < 0)
+                            onPressed: (paymentMethod == 'Tunai' && change < 0)
                                 ? null
                                 : () async {
-                                    if (!isTunai && customerNameCtrl.text.trim().isEmpty) {
+                                    final isDebt = paymentMethod == 'Kasbon';
+                                    if (isDebt && customerNameCtrl.text.trim().isEmpty) {
                                       ScaffoldMessenger.of(modalCtx).showSnackBar(
-                                        const SnackBar(content: Text('⚠️ Nama pelanggan kasbon wajib diisi!'), backgroundColor: Colors.red),
+                                        const SnackBar(
+                                          content: Text('⚠️ Nama pelanggan kasbon wajib diisi!'),
+                                          backgroundColor: Colors.red,
+                                        ),
                                       );
                                       return;
                                     }
                                     Navigator.pop(pCtx);
-                                    final dueDate = dueDays > 0 ? DateTime.now().add(Duration(days: dueDays)) : null;
+                                    final dueDate = (isDebt && dueDays > 0)
+                                        ? DateTime.now().add(Duration(days: dueDays))
+                                        : null;
                                     final trx = await pos.checkout(
-                                      cashPaid: isTunai ? cashPaid : 0.0,
-                                      paymentMethod: isTunai ? 'Tunai' : 'Kasbon',
-                                      customerName: !isTunai ? customerNameCtrl.text.trim() : null,
-                                      customerPhone: !isTunai ? customerPhoneCtrl.text.trim() : null,
-                                      dueDate: !isTunai ? dueDate : null,
-                                      note: !isTunai ? debtNoteCtrl.text.trim() : null,
+                                      cashPaid: paymentMethod == 'Tunai' ? cashPaid : total,
+                                      paymentMethod: paymentMethod,
+                                      customerId: isDebt ? null : pos.selectedCustomer?.id,
+                                      customerName: isDebt
+                                          ? customerNameCtrl.text.trim()
+                                          : pos.effectiveCustomerName,
+                                      customerPhone: isDebt
+                                          ? customerPhoneCtrl.text.trim()
+                                          : pos.selectedCustomer?.phone,
+                                      dueDate: dueDate,
+                                      note: isDebt ? debtNoteCtrl.text.trim() : null,
                                       autoPrint: false,
                                     );
                                     if (trx != null && context.mounted) {
                                       ScaffoldMessenger.of(context).showSnackBar(
                                         SnackBar(
-                                          content: Text(isTunai
-                                              ? '✅ Transaksi ${trx.invoiceNo} disimpan!'
-                                              : '✅ Kasbon atas nama ${customerNameCtrl.text.trim()} berhasil disimpan!'),
+                                          content: Text(isDebt
+                                              ? '✅ Kasbon atas nama ${customerNameCtrl.text.trim()} berhasil disimpan!'
+                                              : '✅ Transaksi ${trx.invoiceNo} disimpan!'),
                                           backgroundColor: const Color(0xFF0F172A),
                                         ),
                                       );
@@ -4485,7 +4623,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
           final expected = shift.calculatedExpectedCash;
           final diff = actual - expected;
 
-          String diffLabel = 'PAS (Seimbang)';
+          String diffLabel = 'PAS (Uang Laci Sesuai)';
           Color diffColor = Colors.green;
           if (diff > 0) {
             diffLabel = 'LEBIH +${_currencyFormat.format(diff)}';
@@ -4497,70 +4635,178 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
 
           return AlertDialog(
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-            title: const Row(
+            title: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Icon(Icons.point_of_sale_rounded, color: Colors.green),
-                SizedBox(width: 8),
-                Text('Tutup Shift Kasir', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                const Row(
+                  children: [
+                    Icon(Icons.point_of_sale_rounded, color: Colors.green),
+                    SizedBox(width: 8),
+                    Text('Tutup Shift Kasir', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                IconButton(icon: const Icon(Icons.close, size: 20), onPressed: () => Navigator.pop(dCtx)),
               ],
             ),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFF8FAFC),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFFE2E8F0)),
+            content: SizedBox(
+              width: double.maxFinite,
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Info Shift Kasir & Jam Buka/Tutup
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: Colors.green.shade50,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.green.shade200),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.access_time_filled_rounded, color: Colors.green.shade800, size: 20),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Kasir: ${shift.cashierName}',
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.green.shade900),
+                                ),
+                                Text(
+                                  'Buka: ${DateFormat("HH:mm").format(shift.openedAt)} WIB • Durasi: ${shift.formattedDuration}',
+                                  style: TextStyle(fontSize: 11, color: Colors.green.shade800),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Modal Awal      : ${_currencyFormat.format(shift.startingCash)}', style: const TextStyle(fontSize: 11)),
-                        Text('Penjualan Tunai : ${_currencyFormat.format(shift.totalCashSales)}', style: const TextStyle(fontSize: 11)),
-                        Text('Kas Masuk (+)   : ${_currencyFormat.format(shift.totalCashIn)}', style: const TextStyle(fontSize: 11, color: Colors.green)),
-                        Text('Kas Keluar (-)  : ${_currencyFormat.format(shift.totalCashOut)}', style: const TextStyle(fontSize: 11, color: Colors.red)),
-                        const Divider(height: 12),
-                        Text('Uang Seharusnya : ${_currencyFormat.format(expected)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-                      ],
+                    const SizedBox(height: 12),
+
+                    // 1. Arus Kas Laci Fisik (Tunai)
+                    const Text('1. Arus Uang Kas Laci Fisik (Tunai):',
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Column(
+                        children: [
+                          _buildShiftDetailRow('Modal Awal Kasir', _currencyFormat.format(shift.startingCash)),
+                          const SizedBox(height: 4),
+                          _buildShiftDetailRow('Penjualan Tunai (+)', _currencyFormat.format(shift.totalCashSales),
+                              color: const Color(0xFF047857)),
+                          const SizedBox(height: 4),
+                          _buildShiftDetailRow('Kas Masuk Operasional (+)', _currencyFormat.format(shift.totalCashIn),
+                              color: Colors.green.shade700),
+                          const SizedBox(height: 4),
+                          _buildShiftDetailRow('Kas Keluar Operasional (-)', _currencyFormat.format(shift.totalCashOut),
+                              color: Colors.red.shade700),
+                          const Divider(height: 12),
+                          _buildShiftDetailRow(
+                            'Uang Laci Seharusnya:',
+                            _currencyFormat.format(expected),
+                            isBold: true,
+                            color: Colors.green.shade900,
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 14),
-                  const Text('Uang Fisik Dihitung di Laci Kasir:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-                  const SizedBox(height: 6),
-                  TextField(
-                    controller: actualCtrl,
-                    keyboardType: TextInputType.number,
-                    onChanged: (_) => setDlgState(() {}),
-                    decoration: InputDecoration(
-                      prefixText: 'Rp ',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    const SizedBox(height: 12),
+
+                    // 2. Arus Non-Tunai (Rekening / QRIS / Kasbon)
+                    const Text('2. Arus Non-Tunai (Bank & Piutang):',
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                    const SizedBox(height: 6),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Column(
+                        children: [
+                          _buildShiftDetailRow('Penjualan QRIS (Bank)', _currencyFormat.format(shift.totalQrisSales),
+                              color: Colors.blue.shade700),
+                          const SizedBox(height: 4),
+                          _buildShiftDetailRow('Penjualan Kasbon (Piutang)', _currencyFormat.format(shift.totalDebtSales),
+                              color: Colors.purple.shade700),
+                          const Divider(height: 12),
+                          _buildShiftDetailRow(
+                            'Total Omset Penjualan:',
+                            _currencyFormat.format(shift.totalSales),
+                            isBold: true,
+                            color: const Color(0xFF0F172A),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                    decoration: BoxDecoration(color: diffColor.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text('Status Selisih:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-                        Text(diffLabel, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: diffColor)),
-                      ],
+                    const SizedBox(height: 14),
+
+                    // 3. Hitung Kas Fisik Laci
+                    const Text('3. Masukkan Uang Tunai Fisik di Laci:',
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 6),
+                    TextField(
+                      controller: actualCtrl,
+                      keyboardType: TextInputType.number,
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                      onChanged: (_) => setDlgState(() {}),
+                      decoration: InputDecoration(
+                        prefixText: 'Rp ',
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        suffixIcon: TextButton(
+                          onPressed: () {
+                            actualCtrl.text = expected.toInt().toString();
+                            setDlgState(() {});
+                          },
+                          child: const Text('Uang Pas', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                        ),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: notesCtrl,
-                    decoration: InputDecoration(
-                      labelText: 'Catatan Tutup Shift (Opsional)',
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                    const SizedBox(height: 8),
+
+                    // Badge Hasil Selisih
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: diffColor.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: diffColor.withValues(alpha: 0.3)),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('Hasil Selisih Kas:', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                          Text(
+                            diffLabel,
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: diffColor),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 10),
+
+                    TextField(
+                      controller: notesCtrl,
+                      decoration: InputDecoration(
+                        labelText: 'Catatan Kasir / Keterangan (Opsional)',
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
             actions: [
@@ -4587,6 +4833,30 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
           );
         },
       ),
+    );
+  }
+
+  Widget _buildShiftDetailRow(String label, String value, {bool isBold = false, Color? color}) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: isBold ? FontWeight.bold : FontWeight.w500,
+            color: const Color(0xFF64748B),
+          ),
+        ),
+        Text(
+          value,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: isBold ? FontWeight.w900 : FontWeight.bold,
+            color: color ?? const Color(0xFF0F172A),
+          ),
+        ),
+      ],
     );
   }
 
@@ -5009,4 +5279,749 @@ Mohon konfirmasi jika sudah melakukan pembayaran. Terima kasih banyak atas kerja
       ),
     );
   }
+
+  // ==========================================
+  // FITUR 1: MASTER PELANGGAN & PEMILIH KASIR
+  // ==========================================
+
+  Widget _buildCustomerSelectorBar(PosProvider pos) {
+    final customer = pos.selectedCustomer;
+    final isUmum = customer == null;
+
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        decoration: BoxDecoration(
+          color: isUmum ? const Color(0xFFF8FAFC) : Colors.blue.shade50,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: isUmum ? const Color(0xFFE2E8F0) : Colors.blue.shade200),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: isUmum ? const Color(0xFFE2E8F0) : Colors.blue.shade100,
+                shape: BoxShape.circle,
+              ),
+              child: Icon(
+                Icons.person,
+                size: 16,
+                color: isUmum ? const Color(0xFF64748B) : Colors.blue.shade800,
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      const Text(
+                        'Pelanggan: ',
+                        style: TextStyle(fontSize: 10, color: Color(0xFF64748B), fontWeight: FontWeight.bold),
+                      ),
+                      Text(
+                        isUmum ? 'Umum (Default)' : customer.name,
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w900,
+                          color: isUmum ? const Color(0xFF0F172A) : Colors.blue.shade900,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (!isUmum && customer.phone != null && customer.phone!.isNotEmpty)
+                    Text(
+                      'No. WA: ${customer.phone}',
+                      style: TextStyle(fontSize: 10, color: Colors.blue.shade700, fontWeight: FontWeight.w600),
+                    ),
+                  if (!isUmum && customer.hasActiveDebt)
+                    Text(
+                      'Ada Kasbon: ${_currencyFormat.format(customer.totalDebt)}',
+                      style: TextStyle(fontSize: 10, color: Colors.red.shade700, fontWeight: FontWeight.w700),
+                    ),
+                ],
+              ),
+            ),
+            if (!isUmum)
+              IconButton(
+                icon: const Icon(Icons.close, size: 16, color: Colors.grey),
+                tooltip: 'Reset ke Umum',
+                visualDensity: VisualDensity.compact,
+                onPressed: () => pos.selectCustomer(null),
+              ),
+            OutlinedButton.icon(
+              icon: const Icon(Icons.swap_horiz_rounded, size: 14),
+              label: Text(isUmum ? 'Pilih' : 'Ganti', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+              style: OutlinedButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+                foregroundColor: isUmum ? const Color(0xFF0F172A) : Colors.blue.shade800,
+                side: BorderSide(color: isUmum ? const Color(0xFFCBD5E1) : Colors.blue.shade300),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              onPressed: () => _showCustomerPickerModal(context, pos),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showCustomerPickerModal(BuildContext context, PosProvider pos) {
+    String search = '';
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (mCtx) => StatefulBuilder(
+        builder: (context, setModalState) {
+          final allCustomers = pos.customers;
+          final filtered = search.trim().isEmpty
+              ? allCustomers
+              : allCustomers.where((c) {
+                  final q = search.trim().toLowerCase();
+                  return c.name.toLowerCase().contains(q) || (c.phone ?? '').contains(q);
+                }).toList();
+
+          return Container(
+            height: MediaQuery.of(context).size.height * 0.8,
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            child: Column(
+              children: [
+                // Header
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 16, 12, 10),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Row(
+                        children: [
+                          Icon(Icons.people_alt_rounded, color: AppConfig.primaryTeal, size: 22),
+                          SizedBox(width: 8),
+                          Text('Pilih Pelanggan Kasir', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                      Row(
+                        children: [
+                          TextButton.icon(
+                            icon: const Icon(Icons.add, size: 16),
+                            label: const Text('+ Baru', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                            onPressed: () async {
+                              final newCust = await _showAddEditCustomerDialog(context, pos);
+                              if (newCust != null) {
+                                pos.selectCustomer(newCust);
+                                if (mCtx.mounted) Navigator.pop(mCtx);
+                              }
+                            },
+                          ),
+                          IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(mCtx)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                // Search Input
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                  child: TextField(
+                    decoration: InputDecoration(
+                      hintText: 'Cari nama atau No. WhatsApp...',
+                      prefixIcon: const Icon(Icons.search, size: 18),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                      isDense: true,
+                    ),
+                    onChanged: (val) => setModalState(() => search = val),
+                  ),
+                ),
+                const Divider(height: 1),
+
+                // Customer List
+                Expanded(
+                  child: ListView(
+                    padding: const EdgeInsets.all(12),
+                    children: [
+                      // Opsi 1: Pelanggan Umum
+                      InkWell(
+                        onTap: () {
+                          pos.selectCustomer(null);
+                          Navigator.pop(mCtx);
+                        },
+                        borderRadius: BorderRadius.circular(12),
+                        child: Container(
+                          padding: const EdgeInsets.all(12),
+                          margin: const EdgeInsets.only(bottom: 8),
+                          decoration: BoxDecoration(
+                            color: pos.selectedCustomer == null ? Colors.blue.shade50 : const Color(0xFFF8FAFC),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: pos.selectedCustomer == null ? Colors.blue.shade300 : const Color(0xFFE2E8F0),
+                              width: pos.selectedCustomer == null ? 1.5 : 1,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              CircleAvatar(
+                                radius: 18,
+                                backgroundColor: Colors.grey.shade300,
+                                child: const Icon(Icons.group, size: 18, color: Color(0xFF475569)),
+                              ),
+                              const SizedBox(width: 12),
+                              const Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text('Pelanggan Umum (Tanpa Data)',
+                                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                    Text('Default untuk pembeli umum atau transaksi cepat',
+                                        style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+                                  ],
+                                ),
+                              ),
+                              if (pos.selectedCustomer == null)
+                                const Icon(Icons.check_circle, color: Colors.blue, size: 20),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                      // Daftar Pelanggan Tersimpan
+                      ...filtered.map((cust) {
+                        final isSelected = pos.selectedCustomer?.id == cust.id;
+                        return InkWell(
+                          onTap: () {
+                            pos.selectCustomer(cust);
+                            Navigator.pop(mCtx);
+                          },
+                          borderRadius: BorderRadius.circular(12),
+                          child: Container(
+                            padding: const EdgeInsets.all(12),
+                            margin: const EdgeInsets.only(bottom: 8),
+                            decoration: BoxDecoration(
+                              color: isSelected ? Colors.blue.shade50 : Colors.white,
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: isSelected ? Colors.blue.shade300 : const Color(0xFFE2E8F0),
+                                width: isSelected ? 1.5 : 1,
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                CircleAvatar(
+                                  radius: 18,
+                                  backgroundColor: AppConfig.primaryTeal.withValues(alpha: 0.15),
+                                  child: Text(
+                                    cust.name.isNotEmpty ? cust.name[0].toUpperCase() : 'P',
+                                    style: TextStyle(fontWeight: FontWeight.bold, color: AppConfig.primaryTeal, fontSize: 14),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(cust.name,
+                                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                      if (cust.phone != null && cust.phone!.isNotEmpty)
+                                        Text('WA: ${cust.phone}',
+                                            style: const TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+                                      if (cust.hasActiveDebt)
+                                        Container(
+                                          margin: const EdgeInsets.only(top: 3),
+                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                                          decoration: BoxDecoration(
+                                            color: Colors.red.shade50,
+                                            borderRadius: BorderRadius.circular(6),
+                                            border: Border.all(color: Colors.red.shade200),
+                                          ),
+                                          child: Text(
+                                            'Kasbon: ${_currencyFormat.format(cust.totalDebt)}',
+                                            style: TextStyle(
+                                                fontSize: 10, fontWeight: FontWeight.bold, color: Colors.red.shade700),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                                if (isSelected)
+                                  const Icon(Icons.check_circle, color: Colors.blue, size: 20),
+                              ],
+                            ),
+                          ),
+                        );
+                      }),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Future<PosCustomer?> _showAddEditCustomerDialog(BuildContext context, PosProvider pos, [PosCustomer? existing]) async {
+    final nameCtrl = TextEditingController(text: existing?.name ?? '');
+    final phoneCtrl = TextEditingController(text: existing?.phone ?? '');
+    final addressCtrl = TextEditingController(text: existing?.address ?? '');
+    final notesCtrl = TextEditingController(text: existing?.notes ?? '');
+
+    return showDialog<PosCustomer?>(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Icon(existing == null ? Icons.person_add_rounded : Icons.edit_note_rounded, color: AppConfig.primaryTeal),
+            const SizedBox(width: 8),
+            Text(existing == null ? 'Tambah Pelanggan Baru' : 'Edit Data Pelanggan',
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: nameCtrl,
+                decoration: InputDecoration(
+                  labelText: 'Nama Pelanggan *',
+                  hintText: 'Contoh: Bu Ani Warung / Pak Budi',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: phoneCtrl,
+                keyboardType: TextInputType.phone,
+                decoration: InputDecoration(
+                  labelText: 'Nomor WhatsApp / HP',
+                  hintText: 'Contoh: 08123456789',
+                  prefixIcon: const Icon(Icons.phone_outlined, size: 18),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: addressCtrl,
+                decoration: InputDecoration(
+                  labelText: 'Alamat (Opsional)',
+                  hintText: 'Contoh: Jl. Merdeka No. 12',
+                  prefixIcon: const Icon(Icons.location_on_outlined, size: 18),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                ),
+              ),
+              const SizedBox(height: 10),
+              TextField(
+                controller: notesCtrl,
+                decoration: InputDecoration(
+                  labelText: 'Catatan Khusus (Opsional)',
+                  hintText: 'Contoh: Langganan warung kopi',
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                ),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dCtx), child: const Text('Batal')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppConfig.primaryTeal,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () async {
+              final name = nameCtrl.text.trim();
+              if (name.isEmpty) {
+                ScaffoldMessenger.of(dCtx).showSnackBar(
+                  const SnackBar(content: Text('⚠️ Nama pelanggan wajib diisi!'), backgroundColor: Colors.red),
+                );
+                return;
+              }
+              Navigator.pop(dCtx);
+              if (existing == null) {
+                final created = await pos.addCustomer(
+                  name: name,
+                  phone: phoneCtrl.text.trim(),
+                  address: addressCtrl.text.trim(),
+                  notes: notesCtrl.text.trim(),
+                );
+                if (created != null && context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('✅ Pelanggan "${created.name}" berhasil ditambahkan!'), backgroundColor: Colors.green),
+                  );
+                }
+              } else {
+                final updated = existing.copyWith(
+                  name: name,
+                  phone: phoneCtrl.text.trim(),
+                  address: addressCtrl.text.trim(),
+                  notes: notesCtrl.text.trim(),
+                  updatedAt: DateTime.now(),
+                );
+                await pos.updateCustomer(updated);
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('✅ Data pelanggan "${updated.name}" diperbarui!'), backgroundColor: Colors.green),
+                  );
+                }
+              }
+            },
+            child: const Text('Simpan Pelanggan', style: TextStyle(fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ==========================================
+  // TAB 1: HALAMAN KHUSUS MASTER PELANGGAN & KASBON
+  // ==========================================
+
+  Widget _buildCustomersTab(PosProvider pos) {
+    final customers = pos.customers;
+    final totalCustomers = customers.length;
+    final totalDebt = pos.debtSummary['total_unpaid'] ?? 0.0;
+    final activeDebtCount = pos.debtSummary['active_count'] ?? 0;
+
+    return Column(
+      children: [
+        // Header Ringkasan Master Pelanggan
+        Container(
+          color: Colors.white,
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.shade50,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: Colors.blue.shade100),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Total Pelanggan',
+                              style: TextStyle(fontSize: 11, color: Color(0xFF475569), fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 2),
+                          Text('$totalCustomers Orang',
+                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.blue.shade900)),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.purple.shade50,
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: Colors.purple.shade100),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Total Piutang Kasbon',
+                              style: TextStyle(fontSize: 11, color: Color(0xFF475569), fontWeight: FontWeight.bold)),
+                          const SizedBox(height: 2),
+                          Text(_currencyFormat.format(totalDebt),
+                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.purple.shade900)),
+                          Text('$activeDebtCount Pelanggan Nunggak',
+                              style: TextStyle(fontSize: 10, color: Colors.purple.shade700, fontWeight: FontWeight.w600)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              // Tombol Tambah Pelanggan
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.person_add_alt_1_rounded, size: 18),
+                      label: const Text('Tambah Pelanggan Baru', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppConfig.primaryTeal,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 11),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: () => _showAddEditCustomerDialog(context, pos),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  OutlinedButton.icon(
+                    icon: const Icon(Icons.menu_book_rounded, size: 16),
+                    label: const Text('Buku Kasbon', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.purple,
+                      side: const BorderSide(color: Colors.purple),
+                      padding: const EdgeInsets.symmetric(vertical: 11, horizontal: 12),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    onPressed: () => _showCustomerDebtsDialog(context, pos),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        const Divider(height: 1),
+
+        // List Pelanggan
+        Expanded(
+          child: customers.isEmpty
+              ? Center(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(Icons.people_outline, size: 54, color: Colors.grey.shade400),
+                      const SizedBox(height: 12),
+                      const Text('Belum ada data pelanggan tersimpan.',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      const SizedBox(height: 4),
+                      const Text('Tambah pelanggan untuk mencatat riwayat belanja & kasbon.',
+                          style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                      const SizedBox(height: 16),
+                      ElevatedButton.icon(
+                        icon: const Icon(Icons.add),
+                        label: const Text('Tambah Pelanggan Pertama'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppConfig.primaryTeal,
+                          foregroundColor: Colors.white,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        onPressed: () => _showAddEditCustomerDialog(context, pos),
+                      ),
+                    ],
+                  ),
+                )
+              : ListView.separated(
+                  padding: const EdgeInsets.all(16),
+                  itemCount: customers.length,
+                  separatorBuilder: (c, i) => const SizedBox(height: 10),
+                  itemBuilder: (ctx, i) {
+                    final cust = customers[i];
+                    final hasDebt = cust.hasActiveDebt;
+
+                    return Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                          color: hasDebt ? Colors.purple.shade200 : const Color(0xFFE2E8F0),
+                          width: hasDebt ? 1.5 : 1,
+                        ),
+                        boxShadow: [
+                          BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 4, offset: const Offset(0, 2)),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              CircleAvatar(
+                                radius: 20,
+                                backgroundColor: hasDebt ? Colors.purple.shade100 : Colors.teal.shade50,
+                                child: Text(
+                                  cust.name.isNotEmpty ? cust.name[0].toUpperCase() : 'P',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                    color: hasDebt ? Colors.purple.shade800 : AppConfig.primaryTeal,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      cust.name,
+                                      style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Color(0xFF0F172A)),
+                                    ),
+                                    if (cust.phone != null && cust.phone!.isNotEmpty) ...[
+                                      const SizedBox(height: 2),
+                                      InkWell(
+                                        onTap: () {
+                                          final phone = cust.phone!.replaceAll(RegExp(r'[^0-9]'), '');
+                                          final target = phone.startsWith('0') ? '62${phone.substring(1)}' : phone;
+                                          final uri = Uri.parse('whatsapp://send?phone=$target');
+                                          launchUrl(uri, mode: LaunchMode.externalApplication);
+                                        },
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            const Icon(Icons.chat, color: Color(0xFF25D366), size: 14),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              cust.phone!,
+                                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF059669)),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                    if (cust.address != null && cust.address!.isNotEmpty) ...[
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        cust.address!,
+                                        style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                              PopupMenuButton<String>(
+                                icon: const Icon(Icons.more_vert, size: 20, color: Color(0xFF64748B)),
+                                onSelected: (val) async {
+                                  if (val == 'edit') {
+                                    _showAddEditCustomerDialog(context, pos, cust);
+                                  } else if (val == 'select_cashier') {
+                                    pos.selectCustomer(cust);
+                                    _tabController.animateTo(0);
+                                  } else if (val == 'delete') {
+                                    _confirmDeleteCustomer(context, pos, cust);
+                                  }
+                                },
+                                itemBuilder: (_) => const [
+                                  PopupMenuItem(value: 'select_cashier', child: Text('Layani di Kasir')),
+                                  PopupMenuItem(value: 'edit', child: Text('Edit Data')),
+                                  PopupMenuItem(value: 'delete', child: Text('Hapus Pelanggan', style: TextStyle(color: Colors.red))),
+                                ],
+                              ),
+                            ],
+                          ),
+
+                          const SizedBox(height: 10),
+
+                          // Status Kasbon & Belanja
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: hasDebt ? Colors.purple.shade50 : const Color(0xFFF8FAFC),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: hasDebt ? Colors.purple.shade200 : const Color(0xFFE2E8F0)),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      hasDebt ? 'TAGIHAN KASBON BELUM LUNAS' : 'STATUS KASBON:',
+                                      style: TextStyle(
+                                        fontSize: 9.5,
+                                        fontWeight: FontWeight.bold,
+                                        color: hasDebt ? Colors.purple.shade800 : const Color(0xFF64748B),
+                                      ),
+                                    ),
+                                    Text(
+                                      hasDebt
+                                          ? _currencyFormat.format(cust.totalDebt)
+                                          : 'Bersih (Tidak Ada Kasbon)',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w900,
+                                        color: hasDebt ? Colors.purple.shade900 : const Color(0xFF047857),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                if (hasDebt)
+                                  ElevatedButton.icon(
+                                    icon: const Icon(Icons.payment, size: 13),
+                                    label: const Text('Bayar', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: Colors.purple,
+                                      foregroundColor: Colors.white,
+                                      visualDensity: VisualDensity.compact,
+                                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                    ),
+                                    onPressed: () => _showCustomerDebtsDialog(context, pos),
+                                  )
+                                else
+                                  ElevatedButton.icon(
+                                    icon: const Icon(Icons.point_of_sale, size: 13),
+                                    label: const Text('Ke Kasir', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: AppConfig.primaryTeal,
+                                      foregroundColor: Colors.white,
+                                      visualDensity: VisualDensity.compact,
+                                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                    ),
+                                    onPressed: () {
+                                      pos.selectCustomer(cust);
+                                      _tabController.animateTo(0);
+                                    },
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
+  }
+
+  void _confirmDeleteCustomer(BuildContext context, PosProvider pos, PosCustomer cust) {
+    showDialog(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Hapus Pelanggan?'),
+        content: Text('Apakah Anda yakin ingin menghapus pelanggan "${cust.name}"? Data kasbon terkait akan tetap tersimpan.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dCtx), child: const Text('Batal')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            onPressed: () async {
+              Navigator.pop(dCtx);
+              await pos.deleteCustomer(cust.id!);
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('✅ Pelanggan "${cust.name}" dihapus!'), backgroundColor: Colors.red),
+                );
+              }
+            },
+            child: const Text('Hapus'),
+          ),
+        ],
+      ),
+    );
+  }
+
 }
