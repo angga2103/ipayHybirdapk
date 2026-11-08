@@ -43,6 +43,12 @@ jobs:
           chmod +x android/gradlew
           flutter build apk --release --no-tree-shake-icons > build.log 2>&1 || BUILD_FAILED=1
           if [ "$BUILD_FAILED" = "1" ]; then
+            echo "Build attempt 1 encountered an issue (e.g. network download timeout), retrying..."
+            sleep 5
+            BUILD_FAILED=0
+            flutter build apk --release --no-tree-shake-icons > build.log 2>&1 || BUILD_FAILED=1
+          fi
+          if [ "$BUILD_FAILED" = "1" ]; then
             tail -n 150 build.log > build_error.txt
             git config user.name "github-actions[bot]"
             git config user.email "github-actions[bot]@users.noreply.github.com"
