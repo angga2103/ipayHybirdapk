@@ -5723,6 +5723,52 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                                       ),
                                     ],
                                   ),
+                                  if (d.payments.isNotEmpty) ...[
+                                    const SizedBox(height: 8),
+                                    Container(
+                                      padding: const EdgeInsets.all(8),
+                                      decoration: BoxDecoration(
+                                        color: const Color(0xFFF1F5F9),
+                                        borderRadius: BorderRadius.circular(10),
+                                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                                      ),
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Row(
+                                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                            children: [
+                                              Text(
+                                                'Riwayat Cicilan (${d.payments.length}x):',
+                                                style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF334155)),
+                                              ),
+                                              Text(
+                                                'Total Masuk: ${_currencyFormat.format(d.paidAmount)}',
+                                                style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Colors.green),
+                                              ),
+                                            ],
+                                          ),
+                                          const SizedBox(height: 4),
+                                          ...d.payments.map((p) => Padding(
+                                                padding: const EdgeInsets.symmetric(vertical: 2),
+                                                child: Row(
+                                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                                  children: [
+                                                    Text(
+                                                      '• ${DateFormat("dd/MM/yy HH:mm").format(p.paymentDate)} (Kasir: ${p.cashierName})',
+                                                      style: const TextStyle(fontSize: 10, color: Color(0xFF64748B)),
+                                                    ),
+                                                    Text(
+                                                      '+${_currencyFormat.format(p.amountPaid)}',
+                                                      style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.green),
+                                                    ),
+                                                  ],
+                                                ),
+                                              )),
+                                        ],
+                                      ),
+                                    ),
+                                  ],
                                   if (!isPaid) ...[
                                     const SizedBox(height: 10),
                                     Row(
