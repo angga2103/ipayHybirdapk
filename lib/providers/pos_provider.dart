@@ -3,6 +3,9 @@ import 'package:flutter/foundation.dart';
 import '../models/pos_cart_item.dart';
 import '../models/pos_product.dart';
 import '../models/pos_transaction.dart';
+import '../models/pos_shift.dart';
+import '../models/pos_cash_flow.dart';
+import '../models/pos_debt.dart';
 import '../services/pos_backup_service.dart';
 import '../services/pos_database_service.dart';
 import '../services/pos_excel_service.dart';
@@ -33,6 +36,14 @@ class PosProvider extends ChangeNotifier {
   String _cashierName = 'Kasir';
   String _storeName = 'IPAY';
   bool _isGridView = false; // Default List view (bisa diubah ke Grid)
+  PosShift? _activeShift;
+  List<PosCashFlow> _activeCashFlows = [];
+  List<PosCustomerDebt> _debts = [];
+  Map<String, dynamic> _debtSummary = {
+    'active_count': 0,
+    'total_unpaid': 0.0,
+    'total_paid': 0.0,
+  };
 
   List<PosProduct> get products => _products;
   List<String> get categories => _categories;
@@ -49,6 +60,11 @@ class PosProvider extends ChangeNotifier {
   String get cashierName => _cashierName;
   String get storeName => _storeName;
   bool get isGridView => _isGridView;
+  PosShift? get activeShift => _activeShift;
+  bool get hasActiveShift => _activeShift != null && _activeShift!.isOpen;
+  List<PosCashFlow> get activeCashFlows => _activeCashFlows;
+  List<PosCustomerDebt> get debts => _debts;
+  Map<String, dynamic> get debtSummary => _debtSummary;
 
   void toggleViewMode() {
     _isGridView = !_isGridView;
@@ -121,6 +137,14 @@ class PosProvider extends ChangeNotifier {
     _transactions = await PosDatabaseService.instance.getAllTransactions(limit: 50);
     _holdCarts = await PosDatabaseService.instance.getAllHoldCarts();
     _todayStats = await PosDatabaseService.instance.getTodaySalesStats();
+    _activeShift = await PosDatabaseService.instance.getActiveShift();
+    if (_activeShift != null) {
+      _activeCashFlows = await PosDatabaseService.instance.getCashFlows(shiftId: _activeShift!.id);
+    } else {
+      _activeCashFlows = await PosDatabaseService.instance.getCashFlows(limit: 20);
+    }
+    _debts = await PosDatabaseService.instance.getAllDebts();
+    _debtSummary = await PosDatabaseService.instance.getDebtSummary();
     notifyListeners();
   }
 
@@ -208,6 +232,9 @@ class PosProvider extends ChangeNotifier {
     String paymentMethod = 'Tunai',
     String? note,
     bool autoPrint = true,
+    String? customerName,
+    String? customerPhone,
+    DateTime? dueDate,
   }) async {
     if (_cart.isEmpty) return null;
 
@@ -219,6 +246,19 @@ class PosProvider extends ChangeNotifier {
         cashierName: _cashierName,
         note: note,
       );
+
+      // Jika metode pembayaran Kasbon, catat ke pos_customer_debts
+      if (paymentMethod.toLowerCase() == 'kasbon' && customerName != null && customerName.trim().isNotEmpty) {
+        await PosDatabaseService.instance.recordCustomerDebt(
+          transactionId: trx.id,
+          invoiceNo: trx.invoiceNo,
+          customerName: customerName,
+          customerPhone: customerPhone,
+          totalAmount: trx.totalAmount,
+          dueDate: dueDate,
+          notes: note,
+        );
+      }
 
       _cart.clear();
       await refreshAll();
@@ -575,6 +615,111 @@ class PosProvider extends ChangeNotifier {
     } catch (e) {
       _errorMessage = 'Gagal mengekspor katalog: $e';
       notifyListeners();
+      return false;
+    }
+  }
+
+  // --- Shift Kasir (Buka / Tutup Toko) ---
+  Future<PosShift?> openShift({required double startingCash, String? notes}) async {
+    try {
+      final shift = await PosDatabaseService.instance.openShift(
+        cashierName: _cashierName,
+        startingCash: startingCash,
+        notes: notes,
+      );
+      _activeShift = shift;
+      _activeCashFlows = [];
+      notifyListeners();
+      return shift;
+    } catch (e) {
+      _errorMessage = 'Gagal membuka shift kasir: $e';
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<PosShift?> closeShift({required double actualCash, String? notes, bool andPrint = true}) async {
+    if (_activeShift == null || _activeShift!.id == null) return null;
+    try {
+      final closed = await PosDatabaseService.instance.closeShift(
+        shiftId: _activeShift!.id!,
+        actualCash: actualCash,
+        notes: notes,
+      );
+      if (andPrint) {
+        await PrinterService.instance.printShiftReceipt(closed, _activeCashFlows, storeName: _storeName);
+      }
+      await refreshAll();
+      return closed;
+    } catch (e) {
+      _errorMessage = 'Gagal menutup shift kasir: $e';
+      notifyListeners();
+      return null;
+    }
+  }
+
+  // --- Kas Masuk / Kas Keluar Operasional ---
+  Future<bool> addCashFlow({
+    required String type,
+    required double amount,
+    required String category,
+    String? note,
+  }) async {
+    try {
+      await PosDatabaseService.instance.recordCashFlow(
+        shiftId: _activeShift?.id,
+        type: type,
+        amount: amount,
+        category: category,
+        note: note,
+        cashierName: _cashierName,
+      );
+      await refreshAll();
+      return true;
+    } catch (e) {
+      _errorMessage = 'Gagal mencatat kas operasional: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  // --- Kasbon & Piutang Pelanggan ---
+  Future<bool> payDebt({
+    required int debtId,
+    required double amount,
+    String? note,
+  }) async {
+    try {
+      await PosDatabaseService.instance.payCustomerDebt(
+        debtId: debtId,
+        amount: amount,
+        cashierName: _cashierName,
+        note: note,
+      );
+      await refreshAll();
+      return true;
+    } catch (e) {
+      _errorMessage = 'Gagal mencatat pembayaran kasbon: $e';
+      notifyListeners();
+      return false;
+    }
+  }
+
+  // --- Cetak Barcode & QR Code Label ---
+  Future<bool> printProductBarcode(
+    PosProduct product, {
+    int qty = 1,
+    bool isQr = false,
+  }) async {
+    try {
+      return await PrinterService.instance.printBarcodeLabels(
+        product,
+        qty: qty,
+        isQr: isQr,
+        storeName: _storeName,
+      );
+    } catch (e) {
+      debugPrint('[PosProvider] Error printProductBarcode: $e');
       return false;
     }
   }

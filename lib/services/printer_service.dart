@@ -15,7 +15,11 @@ import 'package:url_launcher/url_launcher.dart';
 import '../config/app_config.dart';
 import '../models/pos_transaction.dart';
 import 'pos_database_service.dart';
+import 'package:intl/intl.dart';
 import 'storage_service.dart';
+import '../models/pos_product.dart';
+import '../models/pos_shift.dart';
+import '../models/pos_cash_flow.dart';
 
 /// Model Struk Transaksi yang dikirim dari Web via PrintChannel
 class StrukPayload {
@@ -1513,5 +1517,220 @@ class PrinterService {
         );
       },
     );
+  }
+
+  // ==========================================
+  // CETAK LABEL BARCODE / QR CODE PRODUK
+  // ==========================================
+
+  List<int> generateBarcodeLabelBytes(
+    PosProduct product, {
+    int qty = 1,
+    bool isQr = false,
+    String? storeName,
+    int? customWidth,
+  }) {
+    final List<int> bytes = [];
+    final safeQty = qty.clamp(1, 100);
+
+    for (int i = 0; i < safeQty; i++) {
+      // Inisialisasi printer
+      bytes.addAll([0x1B, 0x40]);
+
+      // Rata tengah
+      bytes.addAll([0x1B, 0x61, 1]);
+
+      // 1. Nama Toko
+      final sName = (storeName ?? 'GARUDATEL IPAY').toUpperCase();
+      bytes.addAll(sName.codeUnits);
+      bytes.addAll([0x0A]);
+
+      // 2. Nama Produk (Bold)
+      bytes.addAll([0x1B, 0x45, 1]);
+      bytes.addAll(product.nama.codeUnits);
+      bytes.addAll([0x0A]);
+
+      // 3. Harga Produk (Besar / Bold)
+      final priceStr = 'Rp ${NumberFormat('#,###', 'id_ID').format(product.hargaJual).replaceAll(',', '.')} / ${product.unit}';
+      bytes.addAll(priceStr.codeUnits);
+      bytes.addAll([0x0A]);
+      bytes.addAll([0x1B, 0x45, 0]);
+
+      // 4. Barcode atau QR Code
+      if (isQr) {
+        final qrData = product.kode.codeUnits;
+        final pL = (qrData.length + 3) % 256;
+        final pH = (qrData.length + 3) ~/ 256;
+        bytes.addAll([0x1D, 0x28, 0x6B, 0x04, 0x00, 0x31, 0x41, 0x32, 0x00]);
+        bytes.addAll([0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x43, 0x04]);
+        bytes.addAll([0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x45, 0x31]);
+        bytes.addAll([0x1D, 0x28, 0x6B, pL, pH, 0x31, 0x50, 0x30, ...qrData]);
+        bytes.addAll([0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x51, 0x30]);
+      } else {
+        bytes.addAll([0x1D, 0x68, 50]); // Height
+        bytes.addAll([0x1D, 0x77, 2]);  // Width
+        bytes.addAll([0x1D, 0x48, 2]);  // HRI text below
+        bytes.addAll([0x1D, 0x66, 0]);
+
+        final codeBytes = product.kode.codeUnits;
+        bytes.addAll([0x1D, 0x6B, 0x49, codeBytes.length + 2, 0x7B, 0x42, ...codeBytes]);
+      }
+
+      bytes.addAll([0x0A]);
+      bytes.addAll('SKU: ${product.kode}\n'.codeUnits);
+
+      if (i < safeQty - 1) {
+        bytes.addAll('- - - - - - - - - - - - - - - -\n'.codeUnits);
+        bytes.addAll([0x0A]);
+      } else {
+        bytes.addAll([0x0A, 0x0A]);
+      }
+    }
+
+    if (_paperSize == PaperSize.mm80) {
+      bytes.addAll([0x1D, 0x56, 0x42, 0x00]);
+    }
+
+    return bytes;
+  }
+
+  Future<bool> printBarcodeLabels(
+    PosProduct product, {
+    int qty = 1,
+    bool isQr = false,
+    String? storeName,
+  }) async {
+    try {
+      final isConn = await checkConnectionStatus();
+      if (!isConn) {
+        final mac = await getSavedMac();
+        if (mac == null || mac.isEmpty) return false;
+        final ok = await connect(mac);
+        if (!ok) return false;
+      }
+
+      final bytes = generateBarcodeLabelBytes(product, qty: qty, isQr: isQr, storeName: storeName);
+      return await PrintBluetoothThermal.writeBytes(bytes);
+    } catch (e) {
+      debugPrint('[PrinterService] Error printBarcodeLabels: $e');
+      return false;
+    }
+  }
+
+  // ==========================================
+  // CETAK LAPORAN TUTUP SHIFT KASIR
+  // ==========================================
+
+  List<int> generateShiftReceiptBytes(
+    PosShift shift,
+    List<PosCashFlow> cashFlows, {
+    String? storeName,
+    int? customWidth,
+  }) {
+    final List<int> bytes = [];
+    final width = customWidth ?? maxCharsPerLine;
+    final divider = '=' * (width <= 32 ? 32 : 48);
+    final subDivider = '-' * (width <= 32 ? 32 : 48);
+
+    void text(String s) => bytes.addAll(s.codeUnits);
+    void feed(int n) => bytes.addAll(List.filled(n, 0x0A));
+    void alignCenter() => bytes.addAll([0x1B, 0x61, 1]);
+    void alignLeft() => bytes.addAll([0x1B, 0x61, 0]);
+    void boldOn() => bytes.addAll([0x1B, 0x45, 1]);
+    void boldOff() => bytes.addAll([0x1B, 0x45, 0]);
+
+    bytes.addAll([0x1B, 0x40]);
+
+    alignCenter();
+    boldOn();
+    text('${(storeName ?? "GARUDATEL IPAY").toUpperCase()}\n');
+    text('LAPORAN TUTUP SHIFT KASIR\n');
+    boldOff();
+    text('$divider\n');
+
+    alignLeft();
+    text('Kasir      : ${shift.cashierName}\n');
+    text('Waktu Buka : ${DateFormat('dd/MM/yy HH:mm').format(shift.openedAt)}\n');
+    if (shift.closedAt != null) {
+      text('Waktu Tutup: ${DateFormat('dd/MM/yy HH:mm').format(shift.closedAt!)}\n');
+    }
+    text('Status     : [ ${shift.status} ]\n');
+    text('$subDivider\n');
+
+    final fmt = NumberFormat('#,###', 'id_ID');
+    String formatRow(String label, double val, {String prefix = ''}) {
+      final valStr = '${prefix}Rp ${fmt.format(val).replaceAll(',', '.')}';
+      return formatTwoColumns(label, valStr, maxChars: width);
+    }
+
+    text('${formatRow('Modal Awal (Kas)', shift.startingCash)}\n');
+    text('${formatRow('Penjualan Tunai (+)', shift.totalCashSales)}\n');
+    if (shift.totalNonCashSales > 0) {
+      text('${formatRow('Non-Tunai / Kasbon', shift.totalNonCashSales)}\n');
+    }
+    text('${formatRow('Total Kas Masuk (+)', shift.totalCashIn)}\n');
+    text('${formatRow('Total Kas Keluar (-)', shift.totalCashOut)}\n');
+    text('$subDivider\n');
+
+    boldOn();
+    text('${formatRow('Kas Seharusnya (A)', shift.expectedCash)}\n');
+    text('${formatRow('Kas Dihitung   (B)', shift.actualCash)}\n');
+    boldOff();
+
+    final diff = shift.cashDifference;
+    String diffLabel = 'Selisih (B - A)';
+    String diffStatus = '(PAS / SEIMBANG)';
+    if (diff > 0) diffStatus = '(LEBIH)';
+    if (diff < 0) diffStatus = '(KURANG)';
+
+    boldOn();
+    text('${formatRow('$diffLabel $diffStatus', diff, prefix: diff > 0 ? '+' : '')}\n');
+    boldOff();
+
+    if (cashFlows.isNotEmpty) {
+      text('$subDivider\n');
+      alignCenter();
+      text('Rincian Kas Masuk / Keluar\n');
+      alignLeft();
+      for (final flow in cashFlows) {
+        final sign = flow.isCashIn ? '[+]' : '[-]';
+        final row = '$sign ${flow.category} (${flow.note ?? "-"}): Rp ${fmt.format(flow.amount).replaceAll(",", ".")}';
+        text('$row\n');
+      }
+    }
+
+    text('$divider\n');
+    alignCenter();
+    text('Total Transaksi: ${shift.totalTransactions} Nota\n');
+    text('Dicetak: ${DateFormat('dd/MM/yyyy HH:mm:ss').format(DateTime.now())}\n');
+    feed(2);
+
+    if (_paperSize == PaperSize.mm80) {
+      bytes.addAll([0x1D, 0x56, 0x42, 0x00]);
+    }
+
+    return bytes;
+  }
+
+  Future<bool> printShiftReceipt(
+    PosShift shift,
+    List<PosCashFlow> cashFlows, {
+    String? storeName,
+  }) async {
+    try {
+      final isConn = await checkConnectionStatus();
+      if (!isConn) {
+        final mac = await getSavedMac();
+        if (mac == null || mac.isEmpty) return false;
+        final ok = await connect(mac);
+        if (!ok) return false;
+      }
+
+      final bytes = generateShiftReceiptBytes(shift, cashFlows, storeName: storeName);
+      return await PrintBluetoothThermal.writeBytes(bytes);
+    } catch (e) {
+      debugPrint('[PrinterService] Error printShiftReceipt: $e');
+      return false;
+    }
   }
 }

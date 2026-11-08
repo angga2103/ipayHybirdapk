@@ -3,6 +3,9 @@ import 'package:sqflite/sqflite.dart';
 import '../models/pos_cart_item.dart';
 import '../models/pos_product.dart';
 import '../models/pos_transaction.dart';
+import '../models/pos_shift.dart';
+import '../models/pos_cash_flow.dart';
+import '../models/pos_debt.dart';
 
 class ConsignmentSummary {
   final String penitip;
@@ -60,7 +63,7 @@ class PosDatabaseService {
 
     return await openDatabase(
       path,
-      version: 4,
+      version: 5,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -201,6 +204,78 @@ class PosDatabaseService {
         ''');
         await db.execute('CREATE INDEX idx_hold_carts_id ON pos_hold_carts(cart_id);');
 
+        // 8. Tabel Shift Kasir (Buka/Tutup Toko)
+        await db.execute('''
+          CREATE TABLE pos_shifts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cashier_name TEXT NOT NULL,
+            opened_at TEXT NOT NULL,
+            closed_at TEXT,
+            starting_cash REAL NOT NULL DEFAULT 0,
+            expected_cash REAL NOT NULL DEFAULT 0,
+            actual_cash REAL NOT NULL DEFAULT 0,
+            cash_difference REAL NOT NULL DEFAULT 0,
+            total_cash_sales REAL NOT NULL DEFAULT 0,
+            total_non_cash_sales REAL NOT NULL DEFAULT 0,
+            total_cash_in REAL NOT NULL DEFAULT 0,
+            total_cash_out REAL NOT NULL DEFAULT 0,
+            total_transactions INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'OPEN',
+            notes TEXT
+          );
+        ''');
+        await db.execute('CREATE INDEX idx_shifts_status ON pos_shifts(status);');
+
+        // 9. Tabel Kas Operasional (Petty Cash Masuk / Keluar)
+        await db.execute('''
+          CREATE TABLE pos_cash_flows (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            shift_id INTEGER,
+            type TEXT NOT NULL,
+            amount REAL NOT NULL,
+            category TEXT NOT NULL,
+            note TEXT,
+            cashier_name TEXT NOT NULL DEFAULT 'Kasir',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (shift_id) REFERENCES pos_shifts (id) ON DELETE SET NULL
+          );
+        ''');
+
+        // 10. Tabel Kasbon / Hutang Pelanggan (Piutang Warung)
+        await db.execute('''
+          CREATE TABLE pos_customer_debts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            transaction_id INTEGER,
+            invoice_no TEXT NOT NULL,
+            customer_name TEXT NOT NULL,
+            customer_phone TEXT,
+            total_amount REAL NOT NULL,
+            paid_amount REAL NOT NULL DEFAULT 0,
+            remaining_amount REAL NOT NULL,
+            due_date TEXT,
+            status TEXT NOT NULL DEFAULT 'UNPAID',
+            notes TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (transaction_id) REFERENCES pos_transactions (id) ON DELETE SET NULL
+          );
+        ''');
+        await db.execute('CREATE INDEX idx_debts_status ON pos_customer_debts(status);');
+        await db.execute('CREATE INDEX idx_debts_name ON pos_customer_debts(customer_name);');
+
+        // 11. Tabel Riwayat Pembayaran Cicilan Kasbon
+        await db.execute('''
+          CREATE TABLE pos_debt_payments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            debt_id INTEGER NOT NULL,
+            amount_paid REAL NOT NULL,
+            payment_date TEXT NOT NULL,
+            cashier_name TEXT NOT NULL DEFAULT 'Kasir',
+            note TEXT,
+            FOREIGN KEY (debt_id) REFERENCES pos_customer_debts (id) ON DELETE CASCADE
+          );
+        ''');
+
         // Seeding Awal Default Produk
         await _seedDefaultProducts(db);
       },
@@ -290,6 +365,85 @@ class PosDatabaseService {
               );
             ''');
             await db.execute('CREATE INDEX IF NOT EXISTS idx_hold_carts_id ON pos_hold_carts(cart_id);');
+          } catch (_) {}
+        }
+
+        if (oldVersion < 5) {
+          // Migrasi Skema v4 -> v5 (Shift Kasir, Kas Masuk/Keluar & Kasbon Pelanggan)
+          try {
+            await db.execute('''
+              CREATE TABLE IF NOT EXISTS pos_shifts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                cashier_name TEXT NOT NULL,
+                opened_at TEXT NOT NULL,
+                closed_at TEXT,
+                starting_cash REAL NOT NULL DEFAULT 0,
+                expected_cash REAL NOT NULL DEFAULT 0,
+                actual_cash REAL NOT NULL DEFAULT 0,
+                cash_difference REAL NOT NULL DEFAULT 0,
+                total_cash_sales REAL NOT NULL DEFAULT 0,
+                total_non_cash_sales REAL NOT NULL DEFAULT 0,
+                total_cash_in REAL NOT NULL DEFAULT 0,
+                total_cash_out REAL NOT NULL DEFAULT 0,
+                total_transactions INTEGER NOT NULL DEFAULT 0,
+                status TEXT NOT NULL DEFAULT 'OPEN',
+                notes TEXT
+              );
+            ''');
+            await db.execute('CREATE INDEX IF NOT EXISTS idx_shifts_status ON pos_shifts(status);');
+          } catch (_) {}
+
+          try {
+            await db.execute('''
+              CREATE TABLE IF NOT EXISTS pos_cash_flows (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                shift_id INTEGER,
+                type TEXT NOT NULL,
+                amount REAL NOT NULL,
+                category TEXT NOT NULL,
+                note TEXT,
+                cashier_name TEXT NOT NULL DEFAULT 'Kasir',
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (shift_id) REFERENCES pos_shifts (id) ON DELETE SET NULL
+              );
+            ''');
+          } catch (_) {}
+
+          try {
+            await db.execute('''
+              CREATE TABLE IF NOT EXISTS pos_customer_debts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                transaction_id INTEGER,
+                invoice_no TEXT NOT NULL,
+                customer_name TEXT NOT NULL,
+                customer_phone TEXT,
+                total_amount REAL NOT NULL,
+                paid_amount REAL NOT NULL DEFAULT 0,
+                remaining_amount REAL NOT NULL,
+                due_date TEXT,
+                status TEXT NOT NULL DEFAULT 'UNPAID',
+                notes TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (transaction_id) REFERENCES pos_transactions (id) ON DELETE SET NULL
+              );
+            ''');
+            await db.execute('CREATE INDEX IF NOT EXISTS idx_debts_status ON pos_customer_debts(status);');
+            await db.execute('CREATE INDEX IF NOT EXISTS idx_debts_name ON pos_customer_debts(customer_name);');
+          } catch (_) {}
+
+          try {
+            await db.execute('''
+              CREATE TABLE IF NOT EXISTS pos_debt_payments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                debt_id INTEGER NOT NULL,
+                amount_paid REAL NOT NULL,
+                payment_date TEXT NOT NULL,
+                cashier_name TEXT NOT NULL DEFAULT 'Kasir',
+                note TEXT,
+                FOREIGN KEY (debt_id) REFERENCES pos_customer_debts (id) ON DELETE CASCADE
+              );
+            ''');
           } catch (_) {}
         }
       },
@@ -1134,5 +1288,316 @@ class PosDatabaseService {
       limit: 1,
     );
     return res.isNotEmpty;
+  }
+
+  // ==========================================
+  // SHIFT KASIR & KAS OPERASIONAL (PETTY CASH)
+  // ==========================================
+
+  Future<PosShift?> getActiveShift() async {
+    final db = await database;
+    final res = await db.query(
+      'pos_shifts',
+      where: 'status = ?',
+      whereArgs: ['OPEN'],
+      orderBy: 'opened_at DESC',
+      limit: 1,
+    );
+    if (res.isEmpty) return null;
+    return PosShift.fromMap(res.first);
+  }
+
+  Future<PosShift> openShift({
+    required String cashierName,
+    required double startingCash,
+    String? notes,
+  }) async {
+    final db = await database;
+    // Tutup shift terbuka sebelumnya jika ada
+    await db.update(
+      'pos_shifts',
+      {'status': 'CLOSED', 'closed_at': DateTime.now().toIso8601String()},
+      where: 'status = ?',
+      whereArgs: ['OPEN'],
+    );
+
+    final shift = PosShift(
+      cashierName: cashierName,
+      openedAt: DateTime.now(),
+      startingCash: startingCash,
+      expectedCash: startingCash,
+      actualCash: startingCash,
+      status: 'OPEN',
+      notes: notes,
+    );
+
+    final id = await db.insert('pos_shifts', shift.toMap());
+    return shift.copyWith(id: id);
+  }
+
+  Future<PosShift> closeShift({
+    required int shiftId,
+    required double actualCash,
+    String? notes,
+  }) async {
+    final db = await database;
+    final shiftRes = await db.query('pos_shifts', where: 'id = ?', whereArgs: [shiftId]);
+    if (shiftRes.isEmpty) throw Exception('Shift kasir tidak ditemukan');
+
+    final currentShift = PosShift.fromMap(shiftRes.first);
+
+    // Hitung total transaksi tunai dan non-tunai sejak openedAt
+    final trxRes = await db.rawQuery('''
+      SELECT 
+        COUNT(*) as total_trx,
+        SUM(CASE WHEN payment_method = 'Tunai' THEN total_amount ELSE 0 END) as cash_sales,
+        SUM(CASE WHEN payment_method != 'Tunai' THEN total_amount ELSE 0 END) as non_cash_sales
+      FROM pos_transactions
+      WHERE date_time >= ? AND status != 'CANCELLED'
+    ''', [currentShift.openedAt.toIso8601String()]);
+
+    final totalTrx = (trxRes.first['total_trx'] as int?) ?? 0;
+    final cashSales = (trxRes.first['cash_sales'] as num?)?.toDouble() ?? 0.0;
+    final nonCashSales = (trxRes.first['non_cash_sales'] as num?)?.toDouble() ?? 0.0;
+
+    // Hitung kas masuk & kas keluar
+    final flowRes = await db.rawQuery('''
+      SELECT 
+        SUM(CASE WHEN type = 'IN' THEN amount ELSE 0 END) as cash_in,
+        SUM(CASE WHEN type = 'OUT' THEN amount ELSE 0 END) as cash_out
+      FROM pos_cash_flows
+      WHERE shift_id = ? OR (shift_id IS NULL AND created_at >= ?)
+    ''', [shiftId, currentShift.openedAt.toIso8601String()]);
+
+    final cashIn = (flowRes.first['cash_in'] as num?)?.toDouble() ?? 0.0;
+    final cashOut = (flowRes.first['cash_out'] as num?)?.toDouble() ?? 0.0;
+
+    final expected = currentShift.startingCash + cashSales + cashIn - cashOut;
+    final diff = actualCash - expected;
+    final closedAt = DateTime.now();
+
+    final updated = currentShift.copyWith(
+      closedAt: closedAt,
+      status: 'CLOSED',
+      totalTransactions: totalTrx,
+      totalCashSales: cashSales,
+      totalNonCashSales: nonCashSales,
+      totalCashIn: cashIn,
+      totalCashOut: cashOut,
+      expectedCash: expected,
+      actualCash: actualCash,
+      cashDifference: diff,
+      notes: notes ?? currentShift.notes,
+    );
+
+    await db.update('pos_shifts', updated.toMap(), where: 'id = ?', whereArgs: [shiftId]);
+    return updated;
+  }
+
+  Future<List<PosShift>> getAllShifts({int limit = 30}) async {
+    final db = await database;
+    final maps = await db.query('pos_shifts', orderBy: 'opened_at DESC', limit: limit);
+    return maps.map((m) => PosShift.fromMap(m)).toList();
+  }
+
+  Future<PosCashFlow> recordCashFlow({
+    int? shiftId,
+    required String type,
+    required double amount,
+    required String category,
+    String? note,
+    String cashierName = 'Kasir',
+  }) async {
+    final db = await database;
+    final flow = PosCashFlow(
+      shiftId: shiftId,
+      type: type,
+      amount: amount,
+      category: category,
+      note: note,
+      cashierName: cashierName,
+      createdAt: DateTime.now(),
+    );
+    final id = await db.insert('pos_cash_flows', flow.toMap());
+    return PosCashFlow(
+      id: id,
+      shiftId: flow.shiftId,
+      type: flow.type,
+      amount: flow.amount,
+      category: flow.category,
+      note: flow.note,
+      cashierName: flow.cashierName,
+      createdAt: flow.createdAt,
+    );
+  }
+
+  Future<List<PosCashFlow>> getCashFlows({int? shiftId, int limit = 50}) async {
+    final db = await database;
+    final where = shiftId != null ? 'shift_id = ?' : null;
+    final whereArgs = shiftId != null ? [shiftId] : null;
+    final maps = await db.query(
+      'pos_cash_flows',
+      where: where,
+      whereArgs: whereArgs,
+      orderBy: 'created_at DESC',
+      limit: limit,
+    );
+    return maps.map((m) => PosCashFlow.fromMap(m)).toList();
+  }
+
+  // ==========================================
+  // BUKU KASBON / PIUTANG PELANGGAN
+  // ==========================================
+
+  Future<PosCustomerDebt> recordCustomerDebt({
+    int? transactionId,
+    required String invoiceNo,
+    required String customerName,
+    String? customerPhone,
+    required double totalAmount,
+    DateTime? dueDate,
+    String? notes,
+  }) async {
+    final db = await database;
+    final debt = PosCustomerDebt(
+      transactionId: transactionId,
+      invoiceNo: invoiceNo,
+      customerName: customerName.trim(),
+      customerPhone: customerPhone?.trim(),
+      totalAmount: totalAmount,
+      paidAmount: 0.0,
+      remainingAmount: totalAmount,
+      dueDate: dueDate,
+      status: 'UNPAID',
+      notes: notes,
+      createdAt: DateTime.now(),
+      updatedAt: DateTime.now(),
+    );
+    final id = await db.insert('pos_customer_debts', debt.toMap());
+    return PosCustomerDebt(
+      id: id,
+      transactionId: debt.transactionId,
+      invoiceNo: debt.invoiceNo,
+      customerName: debt.customerName,
+      customerPhone: debt.customerPhone,
+      totalAmount: debt.totalAmount,
+      paidAmount: debt.paidAmount,
+      remainingAmount: debt.remainingAmount,
+      dueDate: debt.dueDate,
+      status: debt.status,
+      notes: debt.notes,
+      createdAt: debt.createdAt,
+      updatedAt: debt.updatedAt,
+    );
+  }
+
+  Future<List<PosCustomerDebt>> getAllDebts({String? status, String? query}) async {
+    final db = await database;
+    String? where;
+    List<dynamic>? whereArgs;
+
+    if (status != null && status != 'ALL') {
+      where = 'status = ?';
+      whereArgs = [status];
+    }
+    if (query != null && query.trim().isNotEmpty) {
+      final q = '%${query.trim()}%';
+      if (where != null) {
+        where += ' AND (customer_name LIKE ? OR customer_phone LIKE ? OR invoice_no LIKE ?)';
+        whereArgs!.addAll([q, q, q]);
+      } else {
+        where = '(customer_name LIKE ? OR customer_phone LIKE ? OR invoice_no LIKE ?)';
+        whereArgs = [q, q, q];
+      }
+    }
+
+    final maps = await db.query(
+      'pos_customer_debts',
+      where: where,
+      whereArgs: whereArgs,
+      orderBy: 'updated_at DESC',
+    );
+
+    final result = <PosCustomerDebt>[];
+    for (final m in maps) {
+      final debtId = m['id'] as int;
+      final payMaps = await db.query(
+        'pos_debt_payments',
+        where: 'debt_id = ?',
+        whereArgs: [debtId],
+        orderBy: 'payment_date DESC',
+      );
+      final payments = payMaps.map((p) => PosDebtPayment.fromMap(p)).toList();
+      result.add(PosCustomerDebt.fromMap(m, payments: payments));
+    }
+    return result;
+  }
+
+  Future<void> payCustomerDebt({
+    required int debtId,
+    required double amount,
+    String cashierName = 'Kasir',
+    String? note,
+  }) async {
+    final db = await database;
+    final debtMaps = await db.query('pos_customer_debts', where: 'id = ?', whereArgs: [debtId]);
+    if (debtMaps.isEmpty) throw Exception('Catatan kasbon tidak ditemukan');
+
+    final currentDebt = PosCustomerDebt.fromMap(debtMaps.first);
+    final newPaid = currentDebt.paidAmount + amount;
+    final newRemaining = (currentDebt.totalAmount - newPaid).clamp(0.0, double.infinity);
+    final newStatus = newRemaining <= 0 ? 'PAID' : 'PARTIAL';
+
+    // 1. Catat pembayaran cicilan
+    await db.insert('pos_debt_payments', {
+      'debt_id': debtId,
+      'amount_paid': amount,
+      'payment_date': DateTime.now().toIso8601String(),
+      'cashier_name': cashierName,
+      'note': note,
+    });
+
+    // 2. Update status kasbon
+    await db.update(
+      'pos_customer_debts',
+      {
+        'paid_amount': newPaid,
+        'remaining_amount': newRemaining,
+        'status': newStatus,
+        'updated_at': DateTime.now().toIso8601String(),
+      },
+      where: 'id = ?',
+      whereArgs: [debtId],
+    );
+
+    // 3. Catat sebagai Kas Masuk Operasional (Pelunasan Kasbon)
+    final activeShift = await getActiveShift();
+    await recordCashFlow(
+      shiftId: activeShift?.id,
+      type: 'IN',
+      amount: amount,
+      category: 'Pelunasan Kasbon',
+      note: 'Cicilan/Pelunasan kasbon nota ${currentDebt.invoiceNo} (${currentDebt.customerName})',
+      cashierName: cashierName,
+    );
+  }
+
+  Future<Map<String, dynamic>> getDebtSummary() async {
+    final db = await database;
+    final res = await db.rawQuery('''
+      SELECT 
+        COUNT(CASE WHEN status != 'PAID' THEN 1 END) as active_count,
+        SUM(remaining_amount) as total_unpaid,
+        SUM(paid_amount) as total_paid
+      FROM pos_customer_debts
+    ''');
+    final activeCount = (res.first['active_count'] as int?) ?? 0;
+    final totalUnpaid = (res.first['total_unpaid'] as num?)?.toDouble() ?? 0.0;
+    final totalPaid = (res.first['total_paid'] as num?)?.toDouble() ?? 0.0;
+    return {
+      'active_count': activeCount,
+      'total_unpaid': totalUnpaid,
+      'total_paid': totalPaid,
+    };
   }
 }

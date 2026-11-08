@@ -1,3 +1,6 @@
+import 'package:mobile_flutter/models/pos_shift.dart';
+import 'package:mobile_flutter/models/pos_cash_flow.dart';
+import 'package:mobile_flutter/models/pos_debt.dart';
 import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -423,6 +426,189 @@ void main() {
       // Memastikan TIDAK ADA teks internal audit seperti 'Diskon Khusus' atau 'Harga Normal' pada struk pembeli
       expect(receipt.contains('Diskon Khusus'), isFalse);
       expect(receipt.contains('Bawah Modal'), isFalse);
+    });
+  });
+
+  group('PosShift & Cashier Shift Tests', () {
+    test('Calculates expected cash and difference correctly', () {
+      final shift = PosShift(
+        cashierName: 'Andi Kasir',
+        openedAt: DateTime(2026, 11, 8, 8, 0),
+        startingCash: 200000,
+        totalCashSales: 550000,
+        totalCashIn: 50000,   // tambahan modal kasir
+        totalCashOut: 30000,  // beli lakban operasional
+        actualCash: 770000,
+      );
+
+      // Expected = 200k + 550k + 50k - 30k = 770k
+      expect(shift.calculatedExpectedCash, equals(770000.0));
+      // Actual 770k -> Difference = 0
+      final diff = shift.actualCash - shift.calculatedExpectedCash;
+      expect(diff, equals(0.0));
+    });
+
+    test('Detects cash shortages accurately', () {
+      final shift = PosShift(
+        cashierName: 'Siti Kasir',
+        openedAt: DateTime(2026, 11, 8, 8, 0),
+        startingCash: 100000,
+        totalCashSales: 200000,
+        totalCashIn: 0,
+        totalCashOut: 0,
+        actualCash: 280000, // Hilang 20rb
+      );
+
+      final diff = shift.actualCash - shift.calculatedExpectedCash;
+      expect(diff, equals(-20000.0));
+    });
+
+    test('Serializes toMap and fromMap accurately', () {
+      final now = DateTime.now();
+      final shift = PosShift(
+        id: 1,
+        cashierName: 'Budi Kasir',
+        openedAt: now,
+        startingCash: 150000,
+        expectedCash: 350000,
+        actualCash: 350000,
+        cashDifference: 0,
+        status: 'OPEN',
+      );
+
+      final map = shift.toMap();
+      final parsed = PosShift.fromMap(map);
+      expect(parsed.id, equals(1));
+      expect(parsed.cashierName, equals('Budi Kasir'));
+      expect(parsed.startingCash, equals(150000.0));
+      expect(parsed.status, equals('OPEN'));
+    });
+  });
+
+  group('PosCashFlow Petty Cash Tests', () {
+    test('Handles Cash IN and Cash OUT correctly', () {
+      final now = DateTime.now();
+      final cashIn = PosCashFlow(
+        type: 'IN',
+        amount: 50000,
+        category: 'Modal Tambahan',
+        note: 'Pecahan kecil dari bos',
+        cashierName: 'Kasir 1',
+        createdAt: now,
+      );
+      expect(cashIn.isCashIn, isTrue);
+      expect(cashIn.isCashOut, isFalse);
+
+      final cashOut = PosCashFlow(
+        type: 'OUT',
+        amount: 15000,
+        category: 'Operasional',
+        note: 'Beli kertas struk thermal',
+        cashierName: 'Kasir 1',
+        createdAt: now,
+      );
+      expect(cashOut.isCashOut, isTrue);
+      expect(cashOut.isCashIn, isFalse);
+
+      final mapOut = cashOut.toMap();
+      final parsedOut = PosCashFlow.fromMap(mapOut);
+      expect(parsedOut.amount, equals(15000.0));
+      expect(parsedOut.category, equals('Operasional'));
+    });
+  });
+
+  group('PosCustomerDebt & Piutang Warung Tests', () {
+    test('Calculates remaining amount, paid status, and overdue status correctly', () {
+      final yesterday = DateTime.now().subtract(const Duration(days: 1));
+      final debt = PosCustomerDebt(
+        id: 10,
+        invoiceNo: 'POS-20261108-001',
+        customerName: 'Bu Ani Warung',
+        customerPhone: '08123456789',
+        totalAmount: 150000,
+        paidAmount: 50000,
+        remainingAmount: 100000,
+        dueDate: yesterday,
+        status: 'PARTIAL',
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      );
+
+      expect(debt.remainingAmount, equals(100000.0));
+      expect(debt.isPaid, isFalse);
+      expect(debt.isPartial, isTrue);
+      expect(debt.isOverdue, isTrue); // Karena dueDate kemarin dan belum lunas
+    });
+
+    test('Fully paid debt is marked isPaid even if overdue date has passed', () {
+      final pastDate = DateTime.now().subtract(const Duration(days: 5));
+      final paidDebt = PosCustomerDebt(
+        id: 11,
+        invoiceNo: 'POS-20261108-002',
+        customerName: 'Pak Budi',
+        totalAmount: 75000,
+        paidAmount: 75000,
+        remainingAmount: 0,
+        dueDate: pastDate,
+        status: 'PAID',
+        createdAt: DateTime.now(),
+        updatedAt: DateTime.now(),
+      );
+
+      expect(paidDebt.isPaid, isTrue);
+      expect(paidDebt.isOverdue, isFalse); // Lunas tidak pernah dianggap overdue
+    });
+  });
+
+  group('PrinterService Barcode Labels & Shift Receipt Tests', () {
+    test('Generates thermal barcode label bytes properly', () {
+      final product = PosProduct(
+        kode: '2012345678',
+        nama: 'Kopi Kapal Api Special',
+        kategori: 'Minuman',
+        unit: 'pcs',
+        hargaDasar: 2500,
+        hargaJual: 3500,
+        stok: 50,
+      );
+
+      final bytes = PrinterService.instance.generateBarcodeLabelBytes(
+        product,
+        qty: 1,
+        isQr: false,
+        storeName: 'TOKO IPAY CELL',
+      );
+
+      expect(bytes, isNotEmpty);
+      expect(bytes.length, greaterThan(30));
+    });
+
+    test('Generates shift closing thermal receipt bytes with discrepancy report', () {
+      final shift = PosShift(
+        id: 1,
+        cashierName: 'Budi Kasir',
+        openedAt: DateTime(2026, 11, 8, 8, 0),
+        closedAt: DateTime(2026, 11, 8, 20, 0),
+        startingCash: 200000,
+        expectedCash: 850000,
+        actualCash: 850000,
+        cashDifference: 0,
+        totalCashSales: 600000,
+        totalNonCashSales: 50000,
+        totalCashIn: 80000,
+        totalCashOut: 30000,
+        totalTransactions: 35,
+        status: 'CLOSED',
+      );
+
+      final bytes = PrinterService.instance.generateShiftReceiptBytes(
+        shift,
+        [],
+        storeName: 'TOKO IPAY CELL',
+      );
+
+      expect(bytes, isNotEmpty);
+      expect(bytes.length, greaterThan(50));
     });
   });
 }
