@@ -24,6 +24,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
   int _loadingProgress = 0;
   bool _hasError = false;
   String _errorMessage = '';
+  bool _hasCheckedInitialUpdate = false;
 
   @override
   void initState() {
@@ -203,12 +204,16 @@ class _WebViewScreenState extends State<WebViewScreen> {
             // Injeksi FCM Token ke sesi Web
             await FcmService.instance.injectTokenToWeb(controller);
 
-            // Periksa pembaruan aplikasi di background & tampilkan info rilis baru
-            if (mounted) {
-              Future.delayed(const Duration(seconds: 2), () {
+            // Periksa pembaruan aplikasi hanya SEKALI saat awal buka aplikasi
+            if (!_hasCheckedInitialUpdate && mounted) {
+              _hasCheckedInitialUpdate = true;
+              Future.delayed(const Duration(seconds: 2), () async {
                 if (mounted) {
-                  AppUpdateService().checkForUpdate(context, silent: true);
-                  AppUpdateService().showWhatsNewDialog(context, force: false);
+                  final hasUpdate = await AppUpdateService().checkForUpdate(context, silent: true);
+                  // Jangan tampilkan dialog Apa yang Baru jika ada pembaruan versi yang belum diinstal
+                  if (!hasUpdate && mounted) {
+                    await AppUpdateService().showWhatsNewDialog(context, force: false);
+                  }
                 }
               });
             }

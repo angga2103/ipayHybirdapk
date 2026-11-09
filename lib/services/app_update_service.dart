@@ -37,15 +37,15 @@ class AppUpdateService {
 
   /// Memeriksa apakah ada update versi baru.
   /// [silent] jika true tidak menampilkan notifikasi jika sudah versi terbaru atau gagal koneksi (background).
-  Future<void> checkForUpdate(BuildContext context, {bool silent = true}) async {
+  Future<bool> checkForUpdate(BuildContext context, {bool silent = true}) async {
     // Cegah spam pengecekan berulang dalam rentang 30 detik jika silent
     if (silent && _lastCheckedTime != null) {
       if (DateTime.now().difference(_lastCheckedTime!).inSeconds < 30) {
-        return;
+        return false;
       }
     }
 
-    if (_isChecking) return;
+    if (_isChecking) return false;
     _isChecking = true;
     _lastCheckedTime = DateTime.now();
 
@@ -53,13 +53,13 @@ class AppUpdateService {
       final info = await _fetchLatestVersionInfo();
       _isChecking = false;
 
-      if (!context.mounted) return;
+      if (!context.mounted) return false;
 
       if (info != null) {
         final isNewer = _isVersionNewer(info.cleanVersion, AppConfig.appVersion);
         if (isNewer) {
           _showUpdateDialog(context, info);
-          return;
+          return true;
         }
       }
 
@@ -90,6 +90,7 @@ class AppUpdateService {
           ),
         );
       }
+      return false;
     } catch (e) {
       _isChecking = false;
       if (!silent && context.mounted) {
@@ -113,6 +114,7 @@ class AppUpdateService {
           ),
         );
       }
+      return false;
     }
   }
 
@@ -202,38 +204,38 @@ class AppUpdateService {
                   child: Column(
                     children: [
                       _buildWhatsNewItem(
-                        icon: Icons.people_alt_rounded,
+                        icon: Icons.badge_rounded,
                         color: AppConfig.primaryTeal,
-                        title: 'Master Pelanggan & Kasbon Lengkap',
-                        desc: 'Tab khusus data pelanggan & kasbon. Pilih nama pelanggan saat transaksi kasir (default nama: "Umum").',
+                        title: 'Audit Nama Kasir di Struk & Laporan',
+                        desc: 'Input nama kasir saat buka shift, otomatis tercetak di struk belanja, struk shift, dan laporan WhatsApp.',
+                      ),
+                      const Divider(height: 14, color: Color(0xFFE2E8F0)),
+                      _buildWhatsNewItem(
+                        icon: Icons.history_edu_rounded,
+                        color: Colors.indigo,
+                        title: 'Audit Trail Riwayat Cicilan Kasbon',
+                        desc: 'Riwayat pembayaran kasbon per kartu hutang mencatat jam, nominal cicilan, dan nama kasir penerima.',
+                      ),
+                      const Divider(height: 14, color: Color(0xFFE2E8F0)),
+                      _buildWhatsNewItem(
+                        icon: Icons.lock_clock_rounded,
+                        color: Colors.amber.shade900,
+                        title: 'Keamanan Shift Kasir Terpadu',
+                        desc: 'Transaksi kasir dan pelunasan kasbon wajib buka kasir terlebih dahulu demi validitas kas fisik laci.',
+                      ),
+                      const Divider(height: 14, color: Color(0xFFE2E8F0)),
+                      _buildWhatsNewItem(
+                        icon: Icons.calendar_month_rounded,
+                        color: Colors.blue.shade700,
+                        title: 'Filter Riwayat Transaksi & Cari Nota',
+                        desc: 'Pilihan riwayat per hari (Hari Ini, Kemarin, Pilih Tanggal) dan cari nomor nota atau nama pelanggan.',
                       ),
                       const Divider(height: 14, color: Color(0xFFE2E8F0)),
                       _buildWhatsNewItem(
                         icon: Icons.point_of_sale_rounded,
-                        color: Colors.indigo,
+                        color: Colors.teal,
                         title: 'Buka & Tutup Kasir (Shift) Transparan',
-                        desc: 'Tercatat jam buka/tutup kasir, nama kasir bertugas, dan pemisahan arus uang fisik laci kasir vs QRIS & kasbon.',
-                      ),
-                      const Divider(height: 14, color: Color(0xFFE2E8F0)),
-                      _buildWhatsNewItem(
-                        icon: Icons.cleaning_services_rounded,
-                        color: Colors.purple,
-                        title: 'Pembersihan Navbar Atas',
-                        desc: 'Pembersihan icon update ganda di header navbar atas agar tampilan lebih ringkas, lega, dan bersih.',
-                      ),
-                      const Divider(height: 14, color: Color(0xFFE2E8F0)),
-                      _buildWhatsNewItem(
-                        icon: Icons.archive_rounded,
-                        color: Colors.blue.shade700,
-                        title: 'Cadangkan & Pulihkan Sistem (.ZIP)',
-                        desc: 'Kemas seluruh database transaksi SQLite v5 + file foto fisik produk ke 1 file ZIP aman.',
-                      ),
-                      const Divider(height: 14, color: Color(0xFFE2E8F0)),
-                      _buildWhatsNewItem(
-                        icon: Icons.qr_code_scanner_rounded,
-                        color: Colors.amber.shade800,
-                        title: 'Scan Barcode Form & Kode Angka GS1',
-                        desc: 'Scan barcode kemasan langsung di kolom input kode dan generator angka murni anti-bentrok.',
+                        desc: 'Kalkulasi uang laci fisik real-time, pencatatan petty cash kas masuk/keluar, dan selisih fisik laci.',
                       ),
                     ],
                   ),
