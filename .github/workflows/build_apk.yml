@@ -109,23 +109,15 @@ jobs:
 
             Aplikasi Android Native Hybrid resmi untuk **GarudaTel iPay (https://ipay.my.id)** dengan integrasi hardware kasir offline-first dan sistem POS mandiri.
 
-            ### 🌟 Fitur Baru di Versi ${{ steps.vars.outputs.tag }}:
-            - **Sistem Kasir POS Offline-First (Penyimpanan Memori HP)**:
-              - Database lokal SQLite cepat, aman, dan tanpa perlu kuota/internet.
-              - Akses instan dari tombol kasir utama di bilah navigasi bawah.
-              - Pencarian produk kilat dengan filter kategori dan barcode tanpa lag.
-              - **Harga Jual Dinamis di Kasir**: Kasir dapat mengubah harga saat transaksi (untuk diskon manual/grosir) dilengkapi peringatan jika di bawah modal, serta riwayat audit lengkap.
-            - **Manajemen Produk & Excel**:
-              - Import & Export produk mudah via file Excel (.xlsx) dengan 8 kolom standar (`KODE`, `NAMA PRODUK`, `UNIT`, `HARGA DASAR`, `HARGA JUAL`, `BERAT`, `STOK`, `KATEGORI`) + info `PENITIP`.
-              - Download template Excel contoh langsung dari HP.
-            - **Sistem Konsinyasi (Titip Jual) & Laporan Bagi Hasil**:
-              - Pencatatan stok barang titipan dan pemilik barang.
-              - Pembagian bagi hasil dan cetak struk penyelesaian konsinyasi ke printer thermal.
-            - **Bluetooth Thermal POS Printer 58mm & 80mm**:
-              - Format 2 kolom presisi rata kiri-kanan otomatis.
-              - Cetak logo toko raster hitam-putih presisi dan jernih.
-              - Mode hemat kertas (paper-saving 1 baris feed).
-              - Tes koneksi & sambung printer via nama atau MAC Address manual.
+            ### 🌟 Pembaruan Utama di Versi ${{ steps.vars.outputs.tag }}:
+            - **Unduhan PDF Terintegrasi di Dalam APK (Rekening Koran & SOP)**:
+              - Mendukung pengunduhan **Rekening Koran Bulanan PDF** langsung di WebView APK sambil menjaga sesi login tetap aktif (`credentials: 'include'`), lengkap dengan dialog aksi **Pratinjau & Simpan PDF / Cetak** dan **Bagikan / Buka di Aplikasi PDF**.
+              - Mendukung **Baca & Unduh SOP Paket Data PDF** tanpa layar putih di Android WebView, serta penanganan otomatis unduhan file/blob.
+            - **Perbaikan Navigasi & Pembaruan Resmi**:
+              - Penanganan otomatis tautan `target="_blank"` dan `window.open` di Android WebView.
+              - Pembaruan aplikasi langsung diarahkan melalui domain resmi `https://ipay.my.id/download/apk`.
+            - **Sistem Kasir POS Offline-First, Konsinyasi, & Thermal Printer**:
+              - Database lokal SQLite, import/export Excel (.xlsx), audit nama kasir & riwayat cicilan kasbon, serta dukungan Bluetooth Thermal POS 58mm/80mm & RawBT.
 
             ---
             ### 📥 Download File APK:

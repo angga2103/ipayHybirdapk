@@ -181,7 +181,7 @@ class AppUpdateService {
                           ),
                           const SizedBox(height: 2),
                           Text(
-                            'Versi v${AppConfig.appVersion} • Fitur Pintar & Kasir Modern',
+                            'Versi v${AppConfig.appVersion} • Perbaikan Unduhan PDF & Navigasi WebView',
                             style: const TextStyle(
                               fontSize: 12,
                               color: AppConfig.primaryTeal,
@@ -204,38 +204,31 @@ class AppUpdateService {
                   child: Column(
                     children: [
                       _buildWhatsNewItem(
-                        icon: Icons.badge_rounded,
+                        icon: Icons.picture_as_pdf_rounded,
+                        color: Colors.red.shade600,
+                        title: 'Download Rekening Koran PDF Langsung di APK',
+                        desc: 'Unduh rekening koran bulanan langsung di APK dengan pratinjau penuh, simpan PDF ke HP, atau bagikan ke WhatsApp.',
+                      ),
+                      const Divider(height: 14, color: Color(0xFFE2E8F0)),
+                      _buildWhatsNewItem(
+                        icon: Icons.menu_book_rounded,
                         color: AppConfig.primaryTeal,
-                        title: 'Audit Nama Kasir di Struk & Laporan',
-                        desc: 'Input nama kasir saat buka shift, otomatis tercetak di struk belanja, struk shift, dan laporan WhatsApp.',
+                        title: 'Baca & Unduh SOP Paket Data Lancar',
+                        desc: 'Viewer SOP interaktif anti-layar putih serta unduhan PDF resmi SOP transaksi kasir langsung di dalam aplikasi.',
                       ),
                       const Divider(height: 14, color: Color(0xFFE2E8F0)),
                       _buildWhatsNewItem(
-                        icon: Icons.history_edu_rounded,
-                        color: Colors.indigo,
-                        title: 'Audit Trail Riwayat Cicilan Kasbon',
-                        desc: 'Riwayat pembayaran kasbon per kartu hutang mencatat jam, nominal cicilan, dan nama kasir penerima.',
-                      ),
-                      const Divider(height: 14, color: Color(0xFFE2E8F0)),
-                      _buildWhatsNewItem(
-                        icon: Icons.lock_clock_rounded,
-                        color: Colors.amber.shade900,
-                        title: 'Keamanan Shift Kasir Terpadu',
-                        desc: 'Transaksi kasir dan pelunasan kasbon wajib buka kasir terlebih dahulu demi validitas kas fisik laci.',
-                      ),
-                      const Divider(height: 14, color: Color(0xFFE2E8F0)),
-                      _buildWhatsNewItem(
-                        icon: Icons.calendar_month_rounded,
+                        icon: Icons.open_in_new_rounded,
                         color: Colors.blue.shade700,
-                        title: 'Filter Riwayat Transaksi & Cari Nota',
-                        desc: 'Pilihan riwayat per hari (Hari Ini, Kemarin, Pilih Tanggal) dan cari nomor nota atau nama pelanggan.',
+                        title: 'Perbaikan Tautan Tab Baru & Unduhan Blob',
+                        desc: 'Semua link target="_blank" dan unduhan dokumen/backup kini tertangani mulus tanpa terblokir WebView Android.',
                       ),
                       const Divider(height: 14, color: Color(0xFFE2E8F0)),
                       _buildWhatsNewItem(
-                        icon: Icons.point_of_sale_rounded,
+                        icon: Icons.system_update_rounded,
                         color: Colors.teal,
-                        title: 'Buka & Tutup Kasir (Shift) Transparan',
-                        desc: 'Kalkulasi uang laci fisik real-time, pencatatan petty cash kas masuk/keluar, dan selisih fisik laci.',
+                        title: 'Pembaruan Aplikasi via Domain Resmi',
+                        desc: 'Proses cek update dan unduhan installer kini langsung terhubung aman melalui server ipay.my.id.',
                       ),
                     ],
                   ),

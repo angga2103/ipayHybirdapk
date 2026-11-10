@@ -1,5 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 import 'package:flutter/services.dart';
 import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -92,19 +95,28 @@ class _WebViewScreenState extends State<WebViewScreen> {
               return NavigationDecision.prevent;
             }
 
-            // 5. CEGAT UNDUHAN PDF TEROTENTIKASI (REKENING KORAN USER / ADMIN)
-            if (url.contains('/mutasi/download-pdf') ||
-                url.contains('/mutasi/rekening-koran') ||
-                url.contains('/rekening-koran')) {
-              _downloadAuthenticatedPdfViaWebView(url);
+            // 5. CEGAT UNDUHAN INSTALLER APK -> BUKA VIA DOWNLOAD MANAGER / BROWSER EKSTERNAL
+            if (url.contains('/download/apk') ||
+                url.contains('/download/app') ||
+                url.toLowerCase().endsWith('.apk')) {
+              _handleExternalDownloadUrl(url);
               return NavigationDecision.prevent;
             }
 
-            // 6. CEGAT UNDUHAN PUBLIK & DOKUMEN PDF (/download/, .pdf) -> BUKA VIA DOWNLOAD MANAGER / BROWSER
-            if (url.contains('/download/') ||
+            // 6. CEGAT UNDUHAN PDF (REKENING KORAN, SOP PAKET DATA, FILE .PDF) -> IN-APP NATIVE PDF ACTION
+            if (url.contains('/mutasi/download-pdf') ||
+                url.contains('/mutasi/rekening-koran') ||
+                url.contains('/rekening-koran') ||
+                url.contains('/download/sop-paket-data') ||
                 url.toLowerCase().contains('.pdf') ||
                 url.contains('raw=1') ||
                 url.contains('format=pdf')) {
+              _downloadPdfViaWebView(url);
+              return NavigationDecision.prevent;
+            }
+
+            // 7. CEGAT UNDUHAN PUBLIK LAINNYA (/download/)
+            if (url.contains('/download/')) {
               _handleExternalDownloadUrl(url);
               return NavigationDecision.prevent;
             }
@@ -212,7 +224,32 @@ class _WebViewScreenState extends State<WebViewScreen> {
                   window._ipayBlankLinkPatched = true;
                   document.addEventListener('click', function(e) {
                     var a = e.target.closest('a');
-                    if (a && a.getAttribute('target') === '_blank' && a.href && !a.href.startsWith('javascript:')) {
+                    if (!a || !a.href || a.href.startsWith('javascript:')) return;
+
+                    // Tangkap unduhan Blob lokal/JSON/File (mis. MuslimTrack backup)
+                    if (a.hasAttribute('download') && (a.href.startsWith('blob:') || a.href.startsWith('data:'))) {
+                      e.preventDefault();
+                      var dlName = a.getAttribute('download') || 'file_ipay.json';
+                      fetch(a.href).then(function(r) { return r.blob(); }).then(function(blob) {
+                        var reader = new FileReader();
+                        reader.onloadend = function() {
+                          var b64 = (reader.result || '').split(',')[1] || '';
+                          if (window.PrintChannel && b64) {
+                            window.PrintChannel.postMessage(JSON.stringify({
+                              type: 'file_download_data',
+                              filename: dlName,
+                              base64: b64
+                            }));
+                          }
+                        };
+                        reader.readAsDataURL(blob);
+                      }).catch(function(err) {
+                        console.error('[Blob Download] Error:', err);
+                      });
+                      return;
+                    }
+
+                    if (a.getAttribute('target') === '_blank') {
                       e.preventDefault();
                       window.location.href = a.href;
                     }
@@ -291,9 +328,25 @@ class _WebViewScreenState extends State<WebViewScreen> {
             if (decoded is Map && decoded['type'] == 'pdf_download_data') {
               final b64 = (decoded['base64'] ?? '').toString();
               final filename = (decoded['filename'] ?? 'Dokumen_iPay.pdf').toString();
+              final sourceUrl = (decoded['source_url'] ?? '').toString();
               if (b64.isNotEmpty) {
                 final bytes = base64Decode(b64);
-                await Printing.sharePdf(bytes: bytes, filename: filename);
+                if (mounted) {
+                  await _showPdfActionBottomSheet(bytes, filename, sourceUrl);
+                }
+              }
+              return;
+            }
+            if (decoded is Map && decoded['type'] == 'file_download_data') {
+              final b64 = (decoded['base64'] ?? '').toString();
+              final filename = (decoded['filename'] ?? 'backup_ipay.json').toString();
+              if (b64.isNotEmpty) {
+                final bytes = base64Decode(b64);
+                final tempDir = await getTemporaryDirectory();
+                final safeName = filename.replaceAll(RegExp(r'[^a-zA-Z0-9._-]'), '_');
+                final file = File('${tempDir.path}/$safeName');
+                await file.writeAsBytes(bytes, flush: true);
+                await Share.shareXFiles([XFile(file.path)], text: 'Dokumen $safeName dari iPay');
               }
               return;
             }
@@ -576,8 +629,19 @@ class _WebViewScreenState extends State<WebViewScreen> {
     }
   }
 
-  Future<void> _downloadAuthenticatedPdfViaWebView(String url) async {
+  Future<void> _downloadPdfViaWebView(String url) async {
     try {
+      String targetUrl = url;
+      String defaultName = 'Dokumen_iPay.pdf';
+      if (targetUrl.contains('sop-paket-data')) {
+        defaultName = 'SOP_Transaksi_Paket_Data_IPAY.pdf';
+        if (!targetUrl.contains('raw=1')) {
+          targetUrl = targetUrl.contains('?') ? '$targetUrl&raw=1' : '$targetUrl?raw=1';
+        }
+      } else if (targetUrl.contains('rekening-koran') || targetUrl.contains('download-pdf')) {
+        defaultName = 'Rekening_Koran_iPay.pdf';
+      }
+
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -586,7 +650,9 @@ class _WebViewScreenState extends State<WebViewScreen> {
           ),
         );
       }
-      final encodedUrl = jsonEncode(url);
+
+      final encodedUrl = jsonEncode(targetUrl);
+      final encodedDefault = jsonEncode(defaultName);
       await _controller.runJavaScript('''
         (async function() {
           try {
@@ -600,8 +666,18 @@ class _WebViewScreenState extends State<WebViewScreen> {
               }
               return;
             }
+            var ctype = (resp.headers.get('content-type') || '').toLowerCase();
+            if (ctype.indexOf('text/html') !== -1) {
+              if (window.PrintChannel) {
+                window.PrintChannel.postMessage(JSON.stringify({
+                  type: 'pdf_error',
+                  message: 'Dokumen belum tersedia atau sesi login berakhir. Silakan muat ulang halaman.'
+                }));
+              }
+              return;
+            }
             var disp = resp.headers.get('content-disposition') || '';
-            var fname = 'Rekening_Koran_iPay.pdf';
+            var fname = $encodedDefault;
             var idx = disp.indexOf('filename=');
             if (idx !== -1) {
               fname = disp.substring(idx + 9).split(';')[0].replace(/["']/g, '').trim();
@@ -615,6 +691,7 @@ class _WebViewScreenState extends State<WebViewScreen> {
                 window.PrintChannel.postMessage(JSON.stringify({
                   type: 'pdf_download_data',
                   filename: fname,
+                  source_url: $encodedUrl,
                   base64: b64
                 }));
               }
@@ -631,8 +708,127 @@ class _WebViewScreenState extends State<WebViewScreen> {
         })();
       ''');
     } catch (e) {
-      debugPrint('[Authenticated PDF Download] Error: $e');
+      debugPrint('[PDF Download] Error: $e');
     }
+  }
+
+  Future<void> _showPdfActionBottomSheet(
+    Uint8List bytes,
+    String filename,
+    String sourceUrl,
+  ) async {
+    if (!mounted) return;
+    final bool isPublicDoc = sourceUrl.contains('sop-paket-data');
+
+    await showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+      ),
+      backgroundColor: Colors.white,
+      builder: (sheetCtx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 14, 20, 22),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFEE2E2),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Icon(Icons.picture_as_pdf_rounded, color: Color(0xFFDC2626), size: 26),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Dokumen PDF Siap!',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: AppConfig.textDark),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            filename,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 12, color: AppConfig.textMuted, fontWeight: FontWeight.w600),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 18),
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppConfig.primaryTeal,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  icon: const Icon(Icons.visibility_rounded, size: 20),
+                  label: const Text('Pratinjau & Simpan PDF / Cetak', style: TextStyle(fontWeight: FontWeight.w700)),
+                  onPressed: () async {
+                    Navigator.pop(sheetCtx);
+                    await Printing.layoutPdf(
+                      onLayout: (_) async => bytes,
+                      name: filename,
+                    );
+                  },
+                ),
+                const SizedBox(height: 10),
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: AppConfig.primaryDark,
+                    side: const BorderSide(color: AppConfig.primaryTeal, width: 1.4),
+                    padding: const EdgeInsets.symmetric(vertical: 13),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  icon: const Icon(Icons.share_rounded, size: 19),
+                  label: const Text('Bagikan / Buka di Aplikasi PDF', style: TextStyle(fontWeight: FontWeight.w700)),
+                  onPressed: () async {
+                    Navigator.pop(sheetCtx);
+                    await Printing.sharePdf(bytes: bytes, filename: filename);
+                  },
+                ),
+                if (isPublicDoc && sourceUrl.isNotEmpty) ...[
+                  const SizedBox(height: 10),
+                  TextButton.icon(
+                    icon: const Icon(Icons.open_in_browser_rounded, size: 18, color: AppConfig.textMuted),
+                    label: const Text(
+                      'Unduh Langsung via Browser Eksternal',
+                      style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700, color: AppConfig.textMuted),
+                    ),
+                    onPressed: () async {
+                      Navigator.pop(sheetCtx);
+                      await _handleExternalDownloadUrl(sourceUrl);
+                    },
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
 
   Future<bool> _handleWillPop() async {
