@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:printing/printing.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
@@ -88,6 +89,23 @@ class _WebViewScreenState extends State<WebViewScreen> {
                 context,
                 MaterialPageRoute(builder: (_) => const PosMainScreen()),
               );
+              return NavigationDecision.prevent;
+            }
+
+            // 5. CEGAT UNDUHAN PDF TEROTENTIKASI (REKENING KORAN USER / ADMIN)
+            if (url.contains('/mutasi/download-pdf') ||
+                url.contains('/mutasi/rekening-koran') ||
+                url.contains('/rekening-koran')) {
+              _downloadAuthenticatedPdfViaWebView(url);
+              return NavigationDecision.prevent;
+            }
+
+            // 6. CEGAT UNDUHAN PUBLIK & DOKUMEN PDF (/download/, .pdf) -> BUKA VIA DOWNLOAD MANAGER / BROWSER
+            if (url.contains('/download/') ||
+                url.toLowerCase().contains('.pdf') ||
+                url.contains('raw=1') ||
+                url.contains('format=pdf')) {
+              _handleExternalDownloadUrl(url);
               return NavigationDecision.prevent;
             }
 
@@ -180,15 +198,26 @@ class _WebViewScreenState extends State<WebViewScreen> {
                   }
                 };
 
-                // 5. Polyfill window.open() khusus link WhatsApp
+                // 5. Polyfill window.open() & link target="_blank" agar selalu terbuka di WebView atau Download Launcher
                 var _origOpen = window.open;
                 window.open = function(url, target, features) {
-                  if (url && (url.indexOf('whatsapp.com') !== -1 || url.indexOf('wa.me') !== -1 || url.indexOf('whatsapp:') !== -1)) {
+                  if (url) {
                     window.location.href = url;
                     return null;
                   }
                   return _origOpen ? _origOpen.apply(this, arguments) : null;
                 };
+
+                if (!window._ipayBlankLinkPatched) {
+                  window._ipayBlankLinkPatched = true;
+                  document.addEventListener('click', function(e) {
+                    var a = e.target.closest('a');
+                    if (a && a.getAttribute('target') === '_blank' && a.href && !a.href.startsWith('javascript:')) {
+                      e.preventDefault();
+                      window.location.href = a.href;
+                    }
+                  });
+                }
 
                 // 6. Hubungkan tombol Kasir di bottom nav atau sidebar ke POS Offline Native
                 document.querySelectorAll('a[href*="/pos"], .nav-fab, .sidebar-item[href*="/pos"]').forEach(function(el) {
@@ -257,6 +286,24 @@ class _WebViewScreenState extends State<WebViewScreen> {
             }
             if (decoded is Map && (decoded['type'] == 'whats_new' || decoded['action'] == 'whats_new')) {
               AppUpdateService().showWhatsNewDialog(context, force: true);
+              return;
+            }
+            if (decoded is Map && decoded['type'] == 'pdf_download_data') {
+              final b64 = (decoded['base64'] ?? '').toString();
+              final filename = (decoded['filename'] ?? 'Dokumen_iPay.pdf').toString();
+              if (b64.isNotEmpty) {
+                final bytes = base64Decode(b64);
+                await Printing.sharePdf(bytes: bytes, filename: filename);
+              }
+              return;
+            }
+            if (decoded is Map && decoded['type'] == 'pdf_error') {
+              final msg = (decoded['message'] ?? 'Gagal mengunduh PDF').toString();
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('⚠️ $msg'), backgroundColor: Colors.red),
+                );
+              }
               return;
             }
           } catch (_) {}
@@ -497,6 +544,94 @@ class _WebViewScreenState extends State<WebViewScreen> {
       }
     } catch (e) {
       debugPrint('[Intent Launcher] Error: $e');
+    }
+  }
+
+  Future<void> _handleExternalDownloadUrl(String url) async {
+    try {
+      // Pastikan untuk link /download/sop-paket-data tetap memuat PDF mentah di browser luar
+      String targetUrl = url;
+      if (targetUrl.contains('/download/sop-paket-data') && !targetUrl.contains('raw=1')) {
+        targetUrl = targetUrl.contains('?') ? '$targetUrl&raw=1' : '$targetUrl?raw=1';
+      }
+      final uri = Uri.tryParse(targetUrl);
+      if (uri != null) {
+        final launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+        if (!launched && mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Tidak dapat membuka browser untuk mengunduh file.'),
+              backgroundColor: Colors.orange,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('[External Download] Error: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Gagal memulai unduhan: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  Future<void> _downloadAuthenticatedPdfViaWebView(String url) async {
+    try {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('⏳ Menyiapkan dokumen PDF...'),
+            duration: Duration(seconds: 2),
+          ),
+        );
+      }
+      final encodedUrl = jsonEncode(url);
+      await _controller.runJavaScript('''
+        (async function() {
+          try {
+            var resp = await fetch($encodedUrl, { credentials: 'include' });
+            if (!resp.ok) {
+              if (window.PrintChannel) {
+                window.PrintChannel.postMessage(JSON.stringify({
+                  type: 'pdf_error',
+                  message: 'Gagal mengunduh PDF (HTTP ' + resp.status + ')'
+                }));
+              }
+              return;
+            }
+            var disp = resp.headers.get('content-disposition') || '';
+            var fname = 'Rekening_Koran_iPay.pdf';
+            var idx = disp.indexOf('filename=');
+            if (idx !== -1) {
+              fname = disp.substring(idx + 9).split(';')[0].replace(/["']/g, '').trim();
+            }
+            var blob = await resp.blob();
+            var reader = new FileReader();
+            reader.onloadend = function() {
+              var res = reader.result || '';
+              var b64 = res.indexOf(',') !== -1 ? res.split(',')[1] : '';
+              if (window.PrintChannel) {
+                window.PrintChannel.postMessage(JSON.stringify({
+                  type: 'pdf_download_data',
+                  filename: fname,
+                  base64: b64
+                }));
+              }
+            };
+            reader.readAsDataURL(blob);
+          } catch (err) {
+            if (window.PrintChannel) {
+              window.PrintChannel.postMessage(JSON.stringify({
+                type: 'pdf_error',
+                message: 'Gagal memproses unduhan: ' + err
+              }));
+            }
+          }
+        })();
+      ''');
+    } catch (e) {
+      debugPrint('[Authenticated PDF Download] Error: $e');
     }
   }
 
