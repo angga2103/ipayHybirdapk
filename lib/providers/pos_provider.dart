@@ -42,6 +42,7 @@ class PosProvider extends ChangeNotifier {
   bool _isGridView = false; // Default List view (bisa diubah ke Grid)
   PosShift? _activeShift;
   List<PosCashFlow> _activeCashFlows = [];
+  List<PosCashFlow> _lastClosedShiftCashFlows = [];
   List<PosCustomerDebt> _debts = [];
   List<PosCustomer> _customers = [];
   PosCustomer? _selectedCustomer;
@@ -72,6 +73,7 @@ class PosProvider extends ChangeNotifier {
   PosShift? get activeShift => _activeShift;
   bool get hasActiveShift => _activeShift != null && _activeShift!.isOpen;
   List<PosCashFlow> get activeCashFlows => _activeCashFlows;
+  List<PosCashFlow> get lastClosedShiftCashFlows => _lastClosedShiftCashFlows;
   List<PosCustomerDebt> get debts => _debts;
   Map<String, dynamic> get debtSummary => _debtSummary;
   List<PosCustomer> get customers => _customers;
@@ -198,6 +200,53 @@ class PosProvider extends ChangeNotifier {
     _errorMessage = null;
     notifyListeners();
     return true;
+  }
+
+  int getProductCartQty(PosProduct product) {
+    final idx = _cart.indexWhere((i) => i.product.id == product.id);
+    return idx >= 0 ? _cart[idx].qty : 0;
+  }
+
+  bool updateProductQty(PosProduct product, int delta) {
+    final idx = _cart.indexWhere((i) => i.product.id == product.id);
+    if (idx >= 0) {
+      return updateCartQty(idx, delta);
+    } else if (delta > 0) {
+      return addToCart(product);
+    }
+    return false;
+  }
+
+  bool setProductCartQty(PosProduct product, int targetQty) {
+    final idx = _cart.indexWhere((i) => i.product.id == product.id);
+    if (targetQty <= 0) {
+      if (idx >= 0) {
+        removeCartItem(idx);
+      }
+      return true;
+    }
+    if (idx >= 0) {
+      final item = _cart[idx];
+      if (item.isStockManaged && targetQty > item.product.stok) {
+        _errorMessage = 'Maksimal stok "${item.product.nama}" tercapai (${item.product.stok} ${item.product.unit}).';
+        notifyListeners();
+        return false;
+      }
+      item.qty = targetQty;
+      _errorMessage = null;
+      notifyListeners();
+      return true;
+    } else {
+      if (product.isStockManaged && targetQty > product.stok) {
+        _errorMessage = 'Maksimal stok "${product.nama}" tercapai (${product.stok} ${product.unit}).';
+        notifyListeners();
+        return false;
+      }
+      _cart.add(PosCartItem(product: product, qty: targetQty));
+      _errorMessage = null;
+      notifyListeners();
+      return true;
+    }
   }
 
   bool updateCartQty(int index, int delta) {
@@ -705,13 +754,15 @@ class PosProvider extends ChangeNotifier {
   Future<PosShift?> closeShift({required double actualCash, String? notes, bool andPrint = true}) async {
     if (_activeShift == null || _activeShift!.id == null) return null;
     try {
+      final flowsToPrint = List<PosCashFlow>.from(_activeCashFlows);
       final closed = await PosDatabaseService.instance.closeShift(
         shiftId: _activeShift!.id!,
         actualCash: actualCash,
         notes: notes,
       );
+      _lastClosedShiftCashFlows = flowsToPrint;
       if (andPrint) {
-        await PrinterService.instance.printShiftReceipt(closed, _activeCashFlows, storeName: _storeName);
+        await PrinterService.instance.printShiftReceipt(closed, flowsToPrint, storeName: _storeName);
       }
       await refreshAll();
       return closed;

@@ -5133,9 +5133,10 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                   Navigator.pop(dCtx);
                   final closed = await pos.closeShift(actualCash: actual, notes: notesCtrl.text, andPrint: false);
                   if (closed != null && context.mounted) {
+                    final flows = await PosDatabaseService.instance.getCashFlows(shiftId: closed.id);
                     await PosWhatsappService.instance.sendShiftReportViaWhatsApp(
                       shift: closed,
-                      cashFlows: pos.activeCashFlows,
+                      cashFlows: flows.isNotEmpty ? flows : pos.lastClosedShiftCashFlows,
                       storeName: pos.storeName,
                     );
                     if (context.mounted) {
@@ -5212,10 +5213,11 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
               foregroundColor: Colors.green.shade800,
               side: BorderSide(color: Colors.green.shade600),
             ),
-            onPressed: () {
-              PosWhatsappService.instance.sendShiftReportViaWhatsApp(
+            onPressed: () async {
+              final flows = await PosDatabaseService.instance.getCashFlows(shiftId: shift.id);
+              await PosWhatsappService.instance.sendShiftReportViaWhatsApp(
                 shift: shift,
-                cashFlows: pos.activeCashFlows,
+                cashFlows: flows.isNotEmpty ? flows : pos.lastClosedShiftCashFlows,
                 storeName: pos.storeName,
               );
             },
@@ -5227,10 +5229,11 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
               backgroundColor: AppConfig.primaryTeal,
               foregroundColor: Colors.white,
             ),
-            onPressed: () {
-              PrinterService.instance.printShiftReceipt(
+            onPressed: () async {
+              final flows = await PosDatabaseService.instance.getCashFlows(shiftId: shift.id);
+              await PrinterService.instance.printShiftReceipt(
                 shift,
-                pos.activeCashFlows,
+                flows.isNotEmpty ? flows : pos.lastClosedShiftCashFlows,
                 storeName: pos.storeName,
               );
             },
@@ -5406,9 +5409,11 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                         visualDensity: VisualDensity.compact,
                                       ),
-                                      onPressed: () {
-                                        PosWhatsappService.instance.sendShiftReportViaWhatsApp(
+                                      onPressed: () async {
+                                        final flows = await PosDatabaseService.instance.getCashFlows(shiftId: s.id);
+                                        await PosWhatsappService.instance.sendShiftReportViaWhatsApp(
                                           shift: s,
+                                          cashFlows: flows,
                                           storeName: pos.storeName,
                                         );
                                       },

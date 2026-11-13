@@ -156,6 +156,14 @@ class PosWhatsappService {
     sb.writeln('--------------------------------');
     sb.writeln('📈 *3. TOTAL OMSET PENJUALAN*');
     sb.writeln('*TOTAL OMSET KOTOR : ${_currencyFormat.format(shift.totalSales)}*');
+    if (cashFlows.isNotEmpty) {
+      sb.writeln('--------------------------------');
+      sb.writeln('📑 *RINCIAN KAS MASUK / KELUAR*');
+      for (final flow in cashFlows) {
+        final sign = flow.isCashIn ? '[+]' : '[-]';
+        sb.writeln('$sign ${flow.category} (${flow.note ?? "-"}): ${_currencyFormat.format(flow.amount)}');
+      }
+    }
     if (shift.notes != null && shift.notes!.trim().isNotEmpty) {
       sb.writeln('--------------------------------');
       sb.writeln('📝 *Catatan Kasir* : ${shift.notes!.trim()}');

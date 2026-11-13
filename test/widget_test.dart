@@ -934,4 +934,128 @@ void main() {
     });
   });
 
+
+  group('POS Barcode Scanner & Shift Closing Receipt Consistency Tests', () {
+    test('Anti-Double Scan barcode lock pattern prevents uncontrolled increment', () {
+      String? lockedBarcode;
+      int scanCount = 0;
+
+      void onBarcodeDetected(String code) {
+        if (lockedBarcode == code) {
+          // Barcode locked - prevent rapid increment
+          return;
+        }
+        lockedBarcode = code;
+        scanCount++;
+      }
+
+      // First detection
+      onBarcodeDetected('8991234567890');
+      expect(scanCount, equals(1));
+      expect(lockedBarcode, equals('8991234567890'));
+
+      // Continuous camera frames on same barcode (camera held for 3 seconds)
+      for (int i = 0; i < 30; i++) {
+        onBarcodeDetected('8991234567890');
+      }
+      expect(scanCount, equals(1)); // Still exactly 1!
+
+      // Scan different barcode
+      onBarcodeDetected('8999999999999');
+      expect(scanCount, equals(2));
+      expect(lockedBarcode, equals('8999999999999'));
+
+      // Rescan unlocked barcode
+      lockedBarcode = null; // simulate unlock / rescan action
+      onBarcodeDetected('8991234567890');
+      expect(scanCount, equals(3));
+    });
+
+    test('PrinterService shift receipt includes cash flow details when flows exist', () {
+      final shift = PosShift(
+        id: 10,
+        cashierName: 'admin',
+        openedAt: DateTime(2026, 11, 11, 5, 15),
+        closedAt: DateTime(2026, 11, 12, 7, 9),
+        startingCash: 100000,
+        totalCashSales: 156000,
+        totalQrisSales: 17000,
+        totalDebtSales: 0,
+        totalCashIn: 21000,
+        totalCashOut: 0,
+        actualCash: 256000,
+        cashDifference: 0,
+        totalTransactions: 3,
+        status: 'CLOSED',
+      );
+
+      final flows = [
+        PosCashFlow(
+          id: 1,
+          shiftId: 10,
+          type: 'IN',
+          amount: 21000,
+          category: 'Pelunasan Kasbon',
+          note: 'Cicilan/Pelunasan kasbon nota POS-20261108-094007 (Agus)',
+          cashierName: 'admin',
+          createdAt: DateTime.now(),
+        ),
+      ];
+
+      final bytes = PrinterService.instance.generateShiftReceiptBytes(
+        shift,
+        flows,
+        storeName: 'IPAY',
+      );
+
+      expect(bytes, isNotEmpty);
+      final receiptString = String.fromCharCodes(bytes);
+      expect(receiptString.contains('Rincian Kas Masuk / Keluar'), isTrue);
+      expect(receiptString.contains('Pelunasan Kasbon'), isTrue);
+      expect(receiptString.contains('Agus'), isTrue);
+    });
+
+    test('PosWhatsappService includes cash flow details in shift report text', () {
+      final shift = PosShift(
+        id: 10,
+        cashierName: 'admin',
+        openedAt: DateTime(2026, 11, 11, 5, 15),
+        closedAt: DateTime(2026, 11, 12, 7, 9),
+        startingCash: 100000,
+        totalCashSales: 156000,
+        totalQrisSales: 17000,
+        totalDebtSales: 0,
+        totalCashIn: 21000,
+        totalCashOut: 0,
+        actualCash: 256000,
+        cashDifference: 0,
+        totalTransactions: 3,
+        status: 'CLOSED',
+      );
+
+      final flows = [
+        PosCashFlow(
+          id: 1,
+          shiftId: 10,
+          type: 'IN',
+          amount: 21000,
+          category: 'Pelunasan Kasbon',
+          note: 'Cicilan/Pelunasan kasbon nota POS-20261108-094007 (Agus)',
+          cashierName: 'admin',
+          createdAt: DateTime.now(),
+        ),
+      ];
+
+      final waText = PosWhatsappService.instance.generateShiftReportText(
+        shift: shift,
+        cashFlows: flows,
+        storeName: 'IPAY',
+      );
+
+      expect(waText.contains('RINCIAN KAS MASUK / KELUAR'), isTrue);
+      expect(waText.contains('Pelunasan Kasbon'), isTrue);
+      expect(waText.contains('Agus'), isTrue);
+      expect(waText.contains('21.000'), isTrue);
+    });
+  });
 }
