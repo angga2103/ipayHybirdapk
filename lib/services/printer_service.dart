@@ -1545,49 +1545,48 @@ class PrinterService {
       // Rata tengah
       bytes.addAll([0x1B, 0x61, 1]);
 
-      // 1. Nama Toko
-      final sName = (storeName ?? 'GARUDATEL IPAY').toUpperCase();
-      bytes.addAll(sName.codeUnits);
-      bytes.addAll([0x0A]);
-
-      // 2. Nama Produk (Bold)
+      // 1. Nama Produk (Bold) - Tanpa header nama toko (desain hemat kertas stiker)
       bytes.addAll([0x1B, 0x45, 1]);
       bytes.addAll(product.nama.codeUnits);
       bytes.addAll([0x0A]);
 
-      // 3. Harga Produk (Besar / Bold)
+      // 2. Harga Produk (Besar / Bold)
       final priceStr = 'Rp ${NumberFormat('#,###', 'id_ID').format(product.hargaJual).replaceAll(',', '.')} / ${product.unit}';
       bytes.addAll(priceStr.codeUnits);
       bytes.addAll([0x0A]);
       bytes.addAll([0x1B, 0x45, 0]);
 
-      // 4. Barcode atau QR Code
+      // 3. Barcode atau QR Code (Desain Compact Hemat Kertas)
       if (isQr) {
+        // QR Code 2D (Modul size 3, presisi & hemat kertas)
         final qrData = product.kode.codeUnits;
         final pL = (qrData.length + 3) % 256;
         final pH = (qrData.length + 3) ~/ 256;
         bytes.addAll([0x1D, 0x28, 0x6B, 0x04, 0x00, 0x31, 0x41, 0x32, 0x00]);
-        bytes.addAll([0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x43, 0x04]);
+        bytes.addAll([0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x43, 0x03]); // module size 3
         bytes.addAll([0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x45, 0x31]);
         bytes.addAll([0x1D, 0x28, 0x6B, pL, pH, 0x31, 0x50, 0x30, ...qrData]);
         bytes.addAll([0x1D, 0x28, 0x6B, 0x03, 0x00, 0x31, 0x51, 0x30]);
+        // Untuk QR Code, tampilkan teks kode langsung di bawah QR (tanpa label 'SKU:' ganda)
+        bytes.addAll([0x0A]);
+        bytes.addAll('${product.kode}\n'.codeUnits);
       } else {
-        bytes.addAll([0x1D, 0x68, 50]); // Height
+        // Barcode 1D (Code 128) - Tinggi 48 dots (~6mm), hemat kertas & mudah di-scan
+        bytes.addAll([0x1D, 0x68, 48]); // Height
         bytes.addAll([0x1D, 0x77, 2]);  // Width
-        bytes.addAll([0x1D, 0x48, 2]);  // HRI text below
-        bytes.addAll([0x1D, 0x66, 0]);
+        bytes.addAll([0x1D, 0x48, 2]);  // HRI text below (teks kode sudah otomatis tampil di bawah garis barcode)
+        bytes.addAll([0x1D, 0x66, 0]);  // HRI Font A
 
         final codeBytes = product.kode.codeUnits;
         bytes.addAll([0x1D, 0x6B, 0x49, codeBytes.length + 2, 0x7B, 0x42, ...codeBytes]);
+        bytes.addAll([0x0A]);
       }
 
-      bytes.addAll([0x0A]);
-      bytes.addAll('SKU: ${product.kode}\n'.codeUnits);
-
+      // Separator antar label (hanya jika mencetak lebih dari 1 stiker)
       if (i < safeQty - 1) {
-        bytes.addAll('- - - - - - - - - - - - - - - -\n'.codeUnits);
-        bytes.addAll([0x0A]);
+        bytes.addAll('- - - - - - - - - - - - - - -\n'.codeUnits);
       } else {
+        // Ujung akhir gulungan stiker: feed secukupnya agar label keluar dari mulut cutter
         bytes.addAll([0x0A, 0x0A]);
       }
     }

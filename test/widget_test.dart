@@ -597,7 +597,7 @@ void main() {
   });
 
   group('PrinterService Barcode Labels & Shift Receipt Tests', () {
-    test('Generates thermal barcode label bytes properly', () {
+    test('Generates compact, paper-saving barcode & qr label bytes without redundant store name and sku text', () {
       final product = PosProduct(
         kode: '2012345678',
         nama: 'Kopi Kapal Api Special',
@@ -608,15 +608,29 @@ void main() {
         stok: 50,
       );
 
-      final bytes = PrinterService.instance.generateBarcodeLabelBytes(
+      final barcodeBytes = PrinterService.instance.generateBarcodeLabelBytes(
         product,
         qty: 1,
         isQr: false,
-        storeName: 'TOKO IPAY CELL',
       );
 
-      expect(bytes, isNotEmpty);
-      expect(bytes.length, greaterThan(30));
+      expect(barcodeBytes, isNotEmpty);
+      final barcodeStr = String.fromCharCodes(barcodeBytes);
+      expect(barcodeStr.contains('Kopi Kapal Api Special'), isTrue);
+      expect(barcodeStr.contains('3.500'), isTrue);
+      // Redundant store name & SKU label removed for paper saving
+      expect(barcodeStr.contains('GARUDATEL IPAY'), isFalse);
+      expect(barcodeStr.contains('SKU:'), isFalse);
+
+      final qrBytes = PrinterService.instance.generateBarcodeLabelBytes(
+        product,
+        qty: 1,
+        isQr: true,
+      );
+      final qrStr = String.fromCharCodes(qrBytes);
+      expect(qrStr.contains('Kopi Kapal Api Special'), isTrue);
+      expect(qrStr.contains('2012345678'), isTrue);
+      expect(qrStr.contains('SKU:'), isFalse);
     });
 
     test('Generates shift closing thermal receipt bytes with discrepancy report', () {
