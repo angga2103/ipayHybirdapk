@@ -20,6 +20,7 @@ import 'storage_service.dart';
 import '../models/pos_product.dart';
 import '../models/pos_shift.dart';
 import '../models/pos_cash_flow.dart';
+import '../models/pos_consignment_payment.dart';
 
 /// Model Struk Transaksi yang dikirim dari Web via PrintChannel
 class StrukPayload {
@@ -1022,6 +1023,98 @@ class PrinterService {
       return await PrintBluetoothThermal.writeBytes(bytes);
     } catch (e) {
       debugPrint('[PrinterService] Error printConsignmentReport: $e');
+      return false;
+    }
+  }
+
+  /// Cetak Bukti Pembayaran Setoran Konsinyasi ke Penitip
+  Future<bool> printConsignmentPaymentReceipt(
+    PosConsignmentPayment payment, {
+    String? storeName,
+  }) async {
+    try {
+      final isConnected = await checkConnectionStatus();
+      if (!isConnected) {
+        final savedMac = await getSavedMac();
+        if (savedMac != null && savedMac.isNotEmpty) {
+          final ok = await connect(savedMac);
+          if (!ok) return false;
+        } else {
+          return false;
+        }
+      }
+
+      final profile = await CapabilityProfile.load();
+      final generator = Generator(_paperSize, profile);
+      List<int> bytes = [];
+
+      bytes += generator.reset();
+
+      // Logo
+      final logoEnabled = await isLogoPrintEnabled();
+      if (logoEnabled) {
+        Uint8List? logoBytes = await getCachedStoreLogo();
+        if (logoBytes == null || logoBytes.isEmpty) {
+          try {
+            final byteData = await rootBundle.load('assets/icon/app_logo.png');
+            logoBytes = byteData.buffer.asUint8List();
+          } catch (_) {}
+        }
+        if (logoBytes != null && logoBytes.isNotEmpty) {
+          final logoRaster = processLogoRaster(logoBytes, generator);
+          if (logoRaster.isNotEmpty) bytes += logoRaster;
+        }
+      }
+
+      String formatRp(double val) {
+        return 'Rp ${val.toInt().toString().replaceAllMapped(RegExp(r'(\d{1,3})(?=(\d{3})+(?!\d))'), (m) => '${m[1]}.')}';
+      }
+
+      final dateStr = DateFormat('dd/MM/yyyy HH:mm').format(payment.createdAt);
+
+      bytes += generator.text(
+        storeName ?? 'GARUDATEL IPAY',
+        styles: const PosStyles(align: PosAlign.center, bold: true),
+      );
+      bytes += generator.text(
+        'BUKTI PEMBAYARAN KONSINYASI',
+        styles: const PosStyles(align: PosAlign.center, bold: true),
+      );
+      bytes += generator.text(dividerLine, styles: const PosStyles(align: PosAlign.center));
+
+      bytes += generator.text(formatTwoColumns('No. Bukti', payment.paymentNo));
+      bytes += generator.text(formatTwoColumns('Tanggal', dateStr));
+      bytes += generator.text(formatTwoColumns('Mitra Penitip', payment.penitip));
+      bytes += generator.text(formatTwoColumns('Kasir / Admin', payment.cashierName));
+      bytes += generator.text(formatTwoColumns('Metode Bayar', payment.paymentMethod));
+      if (payment.note != null && payment.note!.isNotEmpty) {
+        bytes += generator.text(formatTwoColumns('Catatan', payment.note!));
+      }
+      bytes += generator.text(dividerLine, styles: const PosStyles(align: PosAlign.center));
+
+      bytes += generator.text(formatTwoColumns('Kewajiban Awal', formatRp(payment.totalDueBefore)));
+      bytes += generator.text(
+        formatTwoColumns('JUMLAH DIBAYARKAN', formatRp(payment.amountPaid)),
+        styles: const PosStyles(bold: true),
+      );
+      bytes += generator.text(formatTwoColumns('Sisa Kewajiban', formatRp(payment.remainingDue)));
+      bytes += generator.text(
+        formatTwoColumns('Status', payment.paymentStatus),
+        styles: const PosStyles(bold: true),
+      );
+
+      bytes += generator.text(dividerLine, styles: const PosStyles(align: PosAlign.center));
+      bytes += generator.feed(1);
+
+      bytes += generator.text(formatTwoColumns('(   Penerima   )', '(    Kasir    )'));
+      bytes += generator.feed(2);
+      if (_paperSize == PaperSize.mm80) {
+        bytes += generator.cut();
+      }
+
+      return await PrintBluetoothThermal.writeBytes(bytes);
+    } catch (e) {
+      debugPrint('[PrinterService] Error printConsignmentPaymentReceipt: $e');
       return false;
     }
   }

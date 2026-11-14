@@ -2,6 +2,9 @@ import 'package:mobile_flutter/models/pos_customer.dart';
 import 'package:mobile_flutter/models/pos_shift.dart';
 import 'package:mobile_flutter/models/pos_cash_flow.dart';
 import 'package:mobile_flutter/models/pos_debt.dart';
+import 'package:mobile_flutter/models/pos_consignment_payment.dart';
+import 'package:mobile_flutter/models/pos_stock_movement.dart';
+import 'package:mobile_flutter/services/pos_database_service.dart';
 import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -1070,6 +1073,153 @@ void main() {
       expect(waText.contains('Pelunasan Kasbon'), isTrue);
       expect(waText.contains('Agus'), isTrue);
       expect(waText.contains('21.000'), isTrue);
+    });
+  });
+
+  group('Consignment Audit, Shift Integration & Stock Movements Tests', () {
+    test('ConsignmentSummary correctly computes remaining due, status, and zero active debt on full payment', () {
+      final summaryUnpaid = ConsignmentSummary(
+        penitip: 'Bu Siti',
+        variantCount: 2,
+        totalStock: 10,
+        totalSoldQty: 10,
+        totalGross: 150000,
+        totalDueToPenitip: 120000,
+        storeFee: 30000,
+        totalSettled: 0,
+      );
+
+      expect(summaryUnpaid.remainingDue, equals(120000.0));
+      expect(summaryUnpaid.paymentStatus, equals('BELUM DIBAYAR'));
+      expect(summaryUnpaid.isPaidOff, isFalse);
+
+      final summaryPartial = ConsignmentSummary(
+        penitip: 'Bu Siti',
+        variantCount: 2,
+        totalStock: 10,
+        totalSoldQty: 10,
+        totalGross: 150000,
+        totalDueToPenitip: 120000,
+        storeFee: 30000,
+        totalSettled: 60000,
+      );
+
+      expect(summaryPartial.remainingDue, equals(60000.0));
+      expect(summaryPartial.paymentStatus, equals('DIBAYAR SEBAGIAN'));
+      expect(summaryPartial.isPaidOff, isFalse);
+
+      final summaryPaid = ConsignmentSummary(
+        penitip: 'Bu Siti',
+        variantCount: 2,
+        totalStock: 10,
+        totalSoldQty: 10,
+        totalGross: 150000,
+        totalDueToPenitip: 120000,
+        storeFee: 30000,
+        totalSettled: 120000,
+      );
+
+      expect(summaryPaid.remainingDue, equals(0.0));
+      expect(summaryPaid.paymentStatus, equals('LUNAS'));
+      expect(summaryPaid.isPaidOff, isTrue);
+    });
+
+    test('PosConsignmentPayment serialization toMap and fromMap preserves audit trail', () {
+      final now = DateTime(2026, 11, 14, 10, 30);
+      final payment = PosConsignmentPayment(
+        id: 1,
+        paymentNo: 'PAY-CONS-1001',
+        penitip: 'Pak Joko',
+        totalDueBefore: 120000,
+        amountPaid: 60000,
+        remainingDue: 60000,
+        paymentStatus: 'DIBAYAR SEBAGIAN',
+        paymentMethod: 'Tunai',
+        shiftId: 5,
+        cashierName: 'admin',
+        note: 'Cicilan 1 penjualan roti',
+        createdAt: now,
+      );
+
+      final map = payment.toMap();
+      expect(map['payment_no'], equals('PAY-CONS-1001'));
+      expect(map['penitip'], equals('Pak Joko'));
+      expect(map['total_due_before'], equals(120000.0));
+      expect(map['amount_paid'], equals(60000.0));
+      expect(map['remaining_due'], equals(60000.0));
+      expect(map['payment_status'], equals('DIBAYAR SEBAGIAN'));
+      expect(map['payment_method'], equals('Tunai'));
+      expect(map['shift_id'], equals(5));
+      expect(map['cashier_name'], equals('admin'));
+
+      final from = PosConsignmentPayment.fromMap(map);
+      expect(from.id, equals(1));
+      expect(from.paymentNo, equals('PAY-CONS-1001'));
+      expect(from.penitip, equals('Pak Joko'));
+      expect(from.amountPaid, equals(60000.0));
+      expect(from.remainingDue, equals(60000.0));
+      expect(from.paymentStatus, equals('DIBAYAR SEBAGIAN'));
+    });
+
+    test('PosStockMovement serialization tracks batch receipt and inventory movement accurately', () {
+      final now = DateTime(2026, 11, 14, 11, 00);
+      final movement = PosStockMovement(
+        id: 10,
+        productId: 25,
+        productName: 'Roti Bakar Keju',
+        penitip: 'Pak Joko',
+        movementType: 'IN_CONSIGNMENT',
+        qty: 15,
+        beforeStock: 2,
+        afterStock: 17,
+        refNumber: 'SJ-2026-001',
+        operatorName: 'Budi',
+        note: 'Penerimaan batch sore',
+        createdAt: now,
+      );
+
+      final map = movement.toMap();
+      expect(map['product_id'], equals(25));
+      expect(map['penitip'], equals('Pak Joko'));
+      expect(map['movement_type'], equals('IN_CONSIGNMENT'));
+      expect(map['qty'], equals(15));
+      expect(map['before_stock'], equals(2));
+      expect(map['after_stock'], equals(17));
+      expect(map['ref_number'], equals('SJ-2026-001'));
+      expect(map['operator_name'], equals('Budi'));
+
+      final from = PosStockMovement.fromMap(map);
+      expect(from.id, equals(10));
+      expect(from.productId, equals(25));
+      expect(from.qty, equals(15));
+      expect(from.afterStock, equals(17));
+    });
+
+    test('Shift Expected Cash calculation properly deducts consignment cash payout without reducing sales omset', () {
+      final shift = PosShift(
+        id: 1,
+        cashierName: 'admin',
+        openedAt: DateTime(2026, 11, 14, 8, 00),
+        startingCash: 200000,
+        totalCashSales: 500000,
+        totalQrisSales: 100000,
+        totalDebtSales: 0,
+        totalCashIn: 0,
+        totalCashOut: 170000, // 50.000 operasional + 120.000 konsinyasi
+        actualCash: 530000,
+        cashDifference: 0,
+        totalTransactions: 5,
+        status: 'CLOSED',
+      );
+
+      // Rumus: Kas akhir diharapkan = Kas awal (200.000) + Penjualan Tunai (500.000) - Kas Keluar (170.000) = 530.000
+      expect(shift.calculatedExpectedCash, equals(530000.0));
+      expect(shift.cashDifference, equals(0.0));
+      expect(shift.totalSales, equals(600000.0)); // Omset total penjualan tidak terpotong
+    });
+
+    test('AppConfig appVersion is updated to 2.2.8 matching pubspec.yaml', () {
+      expect(AppConfig.appVersion, equals('2.2.8'));
     });
   });
 }

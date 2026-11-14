@@ -7,6 +7,8 @@ import '../models/pos_transaction.dart';
 import '../models/pos_shift.dart';
 import '../models/pos_cash_flow.dart';
 import '../models/pos_debt.dart';
+import '../models/pos_consignment_payment.dart';
+import '../models/pos_stock_movement.dart';
 import '../services/pos_backup_service.dart';
 import '../services/pos_database_service.dart';
 import '../services/pos_excel_service.dart';
@@ -21,6 +23,8 @@ class PosProvider extends ChangeNotifier {
   String _searchQuery = '';
   final List<PosCartItem> _cart = [];
   List<ConsignmentSummary> _consignments = [];
+  List<PosConsignmentPayment> _consignmentPayments = [];
+  List<PosStockMovement> _stockMovements = [];
   List<PosTransaction> _transactions = [];
   DateTime? _historyDate = DateTime.now();
   bool _historyAllDates = false;
@@ -58,6 +62,8 @@ class PosProvider extends ChangeNotifier {
   String get searchQuery => _searchQuery;
   List<PosCartItem> get cart => List.unmodifiable(_cart);
   List<ConsignmentSummary> get consignments => _consignments;
+  List<PosConsignmentPayment> get consignmentPayments => _consignmentPayments;
+  List<PosStockMovement> get stockMovements => _stockMovements;
   List<PosTransaction> get transactions => _transactions;
   DateTime? get historyDate => _historyDate;
   bool get historyAllDates => _historyAllDates;
@@ -148,6 +154,8 @@ class PosProvider extends ChangeNotifier {
     _products = await PosDatabaseService.instance.getAllProducts(includeArchived: false);
     _categories = await PosDatabaseService.instance.getAllCategories();
     _consignments = await PosDatabaseService.instance.getConsignmentSummaries();
+    _consignmentPayments = await PosDatabaseService.instance.getConsignmentPayments();
+    _stockMovements = await PosDatabaseService.instance.getStockMovements();
     _transactions = await PosDatabaseService.instance.getTransactions(
       date: _historyAllDates ? null : _historyDate,
       searchQuery: _historyInvoiceQuery.isNotEmpty ? _historyInvoiceQuery : null,
@@ -655,24 +663,88 @@ class PosProvider extends ChangeNotifier {
     }
   }
 
-  // --- Konsinyasi Settlement ---
+  // --- Konsinyasi Settlement & Stock Movements ---
+  Future<PosConsignmentPayment?> settleConsignmentPayment({
+    required String penitip,
+    required double amountPaid,
+    String paymentMethod = 'Tunai',
+    String? note,
+    String? cashierName,
+    bool andPrint = false,
+  }) async {
+    try {
+      final payment = await PosDatabaseService.instance.recordConsignmentPayment(
+        penitip: penitip,
+        amountPaid: amountPaid,
+        paymentMethod: paymentMethod,
+        note: note,
+        cashierName: cashierName ?? _activeShift?.cashierName ?? _cashierName,
+        shiftId: _activeShift?.id,
+      );
+
+      if (andPrint) {
+        await PrinterService.instance.printConsignmentPaymentReceipt(payment, storeName: _storeName);
+      }
+
+      await refreshAll();
+      return payment;
+    } catch (e) {
+      _errorMessage = 'Gagal mencatat pembayaran konsinyasi: $e';
+      notifyListeners();
+      return null;
+    }
+  }
+
   Future<void> settleConsignment({required ConsignmentSummary summary, bool andPrint = true}) async {
     try {
-      await PosDatabaseService.instance.settleConsignment(
+      await settleConsignmentPayment(
         penitip: summary.penitip,
-        totalQty: summary.totalSoldQty,
-        totalDue: summary.remainingDue,
-        storeFee: summary.storeFee,
+        amountPaid: summary.remainingDue,
+        paymentMethod: 'Tunai',
         note: 'Pelunasan konsinyasi otomatis',
+        andPrint: andPrint,
       );
-      if (andPrint) {
-        await printConsignmentReport(summary);
-      }
-      await refreshAll();
     } catch (e) {
       _errorMessage = 'Gagal mencatat pelunasan konsinyasi: $e';
       notifyListeners();
     }
+  }
+
+  Future<PosStockMovement?> addConsignmentStock({
+    required int productId,
+    required int qty,
+    String? refNumber,
+    String? operatorName,
+    String? note,
+  }) async {
+    try {
+      final movement = await PosDatabaseService.instance.recordStockMovement(
+        productId: productId,
+        movementType: 'IN_CONSIGNMENT',
+        qty: qty,
+        refNumber: refNumber,
+        operatorName: operatorName ?? _activeShift?.cashierName ?? _cashierName,
+        note: note,
+      );
+      await refreshAll();
+      return movement;
+    } catch (e) {
+      _errorMessage = 'Gagal mencatat penambahan stok titipan: $e';
+      notifyListeners();
+      return null;
+    }
+  }
+
+  Future<List<PosConsignmentPayment>> getPaymentsForPenitip(String penitip) async {
+    return await PosDatabaseService.instance.getConsignmentPayments(penitip: penitip);
+  }
+
+  Future<List<PosStockMovement>> getMovementsForPenitip(String penitip) async {
+    return await PosDatabaseService.instance.getStockMovements(penitip: penitip);
+  }
+
+  Future<List<PosProduct>> getProductsForPenitip(String penitip) async {
+    return await PosDatabaseService.instance.getConsignmentProducts(penitip);
   }
 
   // --- Excel Import & Export ---
@@ -754,7 +826,7 @@ class PosProvider extends ChangeNotifier {
   Future<PosShift?> closeShift({required double actualCash, String? notes, bool andPrint = true}) async {
     if (_activeShift == null || _activeShift!.id == null) return null;
     try {
-      final flowsToPrint = List<PosCashFlow>.from(_activeCashFlows);
+      final flowsToPrint = await PosDatabaseService.instance.getCashFlows(shiftId: _activeShift!.id!);
       final closed = await PosDatabaseService.instance.closeShift(
         shiftId: _activeShift!.id!,
         actualCash: actualCash,

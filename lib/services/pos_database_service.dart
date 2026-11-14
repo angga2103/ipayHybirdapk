@@ -7,6 +7,8 @@ import '../models/pos_transaction.dart';
 import '../models/pos_shift.dart';
 import '../models/pos_cash_flow.dart';
 import '../models/pos_debt.dart';
+import '../models/pos_consignment_payment.dart';
+import '../models/pos_stock_movement.dart';
 
 class ConsignmentSummary {
   final String penitip;
@@ -33,6 +35,18 @@ class ConsignmentSummary {
     final diff = totalDueToPenitip - totalSettled;
     return diff < 0 ? 0.0 : diff;
   }
+
+  String get paymentStatus {
+    if (totalDueToPenitip <= 0 || remainingDue <= 0) {
+      return 'LUNAS';
+    } else if (totalSettled > 0) {
+      return 'DIBAYAR SEBAGIAN';
+    } else {
+      return 'BELUM DIBAYAR';
+    }
+  }
+
+  bool get isPaidOff => remainingDue <= 0;
 }
 
 class PosDatabaseService {
@@ -64,7 +78,7 @@ class PosDatabaseService {
 
     return await openDatabase(
       path,
-      version: 6,
+      version: 7,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -299,6 +313,47 @@ class PosDatabaseService {
           );
         ''');
 
+        // 12. Tabel Riwayat Pembayaran Konsinyasi (Audit Trail Setoran Hak Penitip)
+        await db.execute('''
+          CREATE TABLE pos_consignment_payments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            payment_no TEXT UNIQUE NOT NULL,
+            penitip TEXT NOT NULL,
+            total_due_before REAL NOT NULL,
+            amount_paid REAL NOT NULL,
+            remaining_due REAL NOT NULL,
+            payment_status TEXT NOT NULL,
+            payment_method TEXT NOT NULL DEFAULT 'Tunai',
+            shift_id INTEGER,
+            cashier_name TEXT NOT NULL DEFAULT 'Kasir',
+            note TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (shift_id) REFERENCES pos_shifts (id) ON DELETE SET NULL
+          );
+        ''');
+        await db.execute('CREATE INDEX idx_cons_payments_penitip ON pos_consignment_payments(penitip);');
+        await db.execute('CREATE INDEX idx_cons_payments_shift ON pos_consignment_payments(shift_id);');
+
+        // 13. Tabel Buku Besar Mutasi Stok (Inventory Movements)
+        await db.execute('''
+          CREATE TABLE pos_stock_movements (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id INTEGER NOT NULL,
+            penitip TEXT,
+            movement_type TEXT NOT NULL,
+            qty INTEGER NOT NULL,
+            before_stock INTEGER NOT NULL,
+            after_stock INTEGER NOT NULL,
+            ref_number TEXT,
+            operator_name TEXT NOT NULL DEFAULT 'Admin',
+            note TEXT,
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (product_id) REFERENCES pos_products (id) ON DELETE CASCADE
+          );
+        ''');
+        await db.execute('CREATE INDEX idx_stock_movements_prod ON pos_stock_movements(product_id);');
+        await db.execute('CREATE INDEX idx_stock_movements_penitip ON pos_stock_movements(penitip);');
+
         // Seeding Awal Default Produk
         await _seedDefaultProducts(db);
       },
@@ -509,6 +564,73 @@ class PosDatabaseService {
           } catch (_) {}
           try {
             await db.execute('ALTER TABLE pos_shifts ADD COLUMN total_debt_sales REAL NOT NULL DEFAULT 0;');
+          } catch (_) {}
+        }
+
+        if (oldVersion < 7) {
+          // Migrasi Skema v6 -> v7 (Buku Besar Pembayaran Konsinyasi & Audit Mutasi Stok)
+          try {
+            await db.execute('''
+              CREATE TABLE IF NOT EXISTS pos_consignment_payments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                payment_no TEXT UNIQUE NOT NULL,
+                penitip TEXT NOT NULL,
+                total_due_before REAL NOT NULL,
+                amount_paid REAL NOT NULL,
+                remaining_due REAL NOT NULL,
+                payment_status TEXT NOT NULL,
+                payment_method TEXT NOT NULL DEFAULT 'Tunai',
+                shift_id INTEGER,
+                cashier_name TEXT NOT NULL DEFAULT 'Kasir',
+                note TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (shift_id) REFERENCES pos_shifts (id) ON DELETE SET NULL
+              );
+            ''');
+            await db.execute('CREATE INDEX IF NOT EXISTS idx_cons_payments_penitip ON pos_consignment_payments(penitip);');
+            await db.execute('CREATE INDEX IF NOT EXISTS idx_cons_payments_shift ON pos_consignment_payments(shift_id);');
+          } catch (_) {}
+
+          try {
+            await db.execute('''
+              CREATE TABLE IF NOT EXISTS pos_stock_movements (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                product_id INTEGER NOT NULL,
+                penitip TEXT,
+                movement_type TEXT NOT NULL,
+                qty INTEGER NOT NULL,
+                before_stock INTEGER NOT NULL,
+                after_stock INTEGER NOT NULL,
+                ref_number TEXT,
+                operator_name TEXT NOT NULL DEFAULT 'Admin',
+                note TEXT,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (product_id) REFERENCES pos_products (id) ON DELETE CASCADE
+              );
+            ''');
+            await db.execute('CREATE INDEX IF NOT EXISTS idx_stock_movements_prod ON pos_stock_movements(product_id);');
+            await db.execute('CREATE INDEX IF NOT EXISTS idx_stock_movements_penitip ON pos_stock_movements(penitip);');
+          } catch (_) {}
+
+          // Migrasi otomatis catatan setoran lama jika ada ke pos_consignment_payments
+          try {
+            await db.execute('''
+              INSERT INTO pos_consignment_payments (
+                payment_no, penitip, total_due_before, amount_paid, remaining_due, payment_status, payment_method, cashier_name, note, created_at
+              )
+              SELECT 
+                'SETTLE-LEGACY-' || id,
+                penitip,
+                total_due,
+                total_due,
+                0,
+                'LUNAS',
+                'Tunai',
+                'Sistem (Migrasi)',
+                COALESCE(note, 'Migrasi riwayat setoran lama'),
+                date_time
+              FROM pos_consignment_settlements;
+            ''');
           } catch (_) {}
         }
       },
@@ -1271,13 +1393,23 @@ class PosDatabaseService {
       final totalDue = (salesResult.first['total_due'] as num).toDouble();
       final storeFee = (salesResult.first['store_fee'] as num).toDouble();
 
-      // 3. Data pelunasan yang sudah disetorkan
-      final settleResult = await db.rawQuery('''
-        SELECT COALESCE(SUM(total_due), 0) as total_settled
-        FROM pos_consignment_settlements
+      // 3. Data pelunasan yang sudah disetorkan (dari pos_consignment_payments atau pos_consignment_settlements)
+      final paymentsResult = await db.rawQuery('''
+        SELECT COALESCE(SUM(amount_paid), 0) as total_paid
+        FROM pos_consignment_payments
         WHERE penitip = ?
       ''', [p]);
-      final totalSettled = (settleResult.first['total_settled'] as num).toDouble();
+      final totalPaid = (paymentsResult.first['total_paid'] as num).toDouble();
+
+      double totalSettled = totalPaid;
+      if (totalSettled <= 0) {
+        final settleResult = await db.rawQuery('''
+          SELECT COALESCE(SUM(total_due), 0) as total_settled
+          FROM pos_consignment_settlements
+          WHERE penitip = ?
+        ''', [p]);
+        totalSettled = (settleResult.first['total_settled'] as num).toDouble();
+      }
 
       summaries.add(ConsignmentSummary(
         penitip: p,
@@ -1294,6 +1426,213 @@ class PosDatabaseService {
     return summaries;
   }
 
+  /// Catat pembayaran / setoran hak kepada penitip dengan audit lengkap
+  Future<PosConsignmentPayment> recordConsignmentPayment({
+    required String penitip,
+    required double amountPaid,
+    String paymentMethod = 'Tunai',
+    String? note,
+    String? cashierName,
+    int? shiftId,
+  }) async {
+    final db = await database;
+
+    // Hitung kewajiban sebelum pembayaran ini
+    final summaries = await getConsignmentSummaries();
+    final currentSummary = summaries.firstWhere(
+      (s) => s.penitip == penitip,
+      orElse: () => ConsignmentSummary(
+        penitip: penitip,
+        variantCount: 0,
+        totalStock: 0,
+        totalSoldQty: 0,
+        totalGross: 0,
+        totalDueToPenitip: 0,
+        storeFee: 0,
+      ),
+    );
+
+    final totalDueBefore = currentSummary.remainingDue;
+    final remainingDue = (totalDueBefore - amountPaid).clamp(0.0, double.infinity);
+    final status = remainingDue <= 0 ? 'LUNAS' : 'DIBAYAR SEBAGIAN';
+    final paymentNo = 'PAY-CONS-${DateTime.now().millisecondsSinceEpoch}';
+    final activeShift = shiftId != null ? null : await getActiveShift();
+    final effectiveShiftId = shiftId ?? activeShift?.id;
+    final effectiveCashier = cashierName ?? activeShift?.cashierName ?? 'Kasir';
+    final now = DateTime.now();
+
+    final payment = PosConsignmentPayment(
+      paymentNo: paymentNo,
+      penitip: penitip,
+      totalDueBefore: totalDueBefore,
+      amountPaid: amountPaid,
+      remainingDue: remainingDue,
+      paymentStatus: status,
+      paymentMethod: paymentMethod,
+      shiftId: effectiveShiftId,
+      cashierName: effectiveCashier,
+      note: note,
+      createdAt: now,
+    );
+
+    final id = await db.insert('pos_consignment_payments', payment.toMap());
+
+    // Jika pembayaran tunai dan kas laci kasir aktif, otomatis catat arus kas keluar (OUT)
+    if (paymentMethod.toLowerCase() == 'tunai' || paymentMethod.toLowerCase() == 'cash') {
+      await recordCashFlow(
+        shiftId: effectiveShiftId,
+        type: 'OUT',
+        amount: amountPaid,
+        category: 'Pembayaran Konsinyasi',
+        note: 'Setoran penitip $penitip ($paymentNo)',
+        cashierName: effectiveCashier,
+      );
+    }
+
+    // Tetap catat ke tabel pos_consignment_settlements demi kompatibilitas penuh skema lama
+    try {
+      await db.insert('pos_consignment_settlements', {
+        'penitip': penitip,
+        'date_time': now.toIso8601String(),
+        'total_qty': currentSummary.totalSoldQty,
+        'total_due': amountPaid,
+        'store_fee': currentSummary.storeFee,
+        'note': note ?? 'Pembayaran $status ($paymentNo)',
+      });
+    } catch (_) {}
+
+    return PosConsignmentPayment(
+      id: id,
+      paymentNo: payment.paymentNo,
+      penitip: payment.penitip,
+      totalDueBefore: payment.totalDueBefore,
+      amountPaid: payment.amountPaid,
+      remainingDue: payment.remainingDue,
+      paymentStatus: payment.paymentStatus,
+      paymentMethod: payment.paymentMethod,
+      shiftId: payment.shiftId,
+      cashierName: payment.cashierName,
+      note: payment.note,
+      createdAt: payment.createdAt,
+    );
+  }
+
+  /// Ambil riwayat pembayaran konsinyasi per penitip atau keseluruhan
+  Future<List<PosConsignmentPayment>> getConsignmentPayments({String? penitip}) async {
+    final db = await database;
+    final List<Map<String, dynamic>> res;
+    if (penitip != null && penitip.isNotEmpty) {
+      res = await db.query(
+        'pos_consignment_payments',
+        where: 'penitip = ?',
+        whereArgs: [penitip],
+        orderBy: 'created_at DESC',
+      );
+    } else {
+      res = await db.query(
+        'pos_consignment_payments',
+        orderBy: 'created_at DESC',
+      );
+    }
+    return res.map((m) => PosConsignmentPayment.fromMap(m)).toList();
+  }
+
+  /// Ambil daftar produk titipan milik penitip tertentu
+  Future<List<PosProduct>> getConsignmentProducts(String penitip) async {
+    final db = await database;
+    final res = await db.query(
+      'pos_products',
+      where: 'penitip = ? AND is_archived = 0',
+      whereArgs: [penitip],
+      orderBy: 'nama ASC',
+    );
+    return res.map((m) => PosProduct.fromMap(m)).toList();
+  }
+
+  /// Catat mutasi penambahan / pergerakan stok konsinyasi atau produk umum
+  Future<PosStockMovement> recordStockMovement({
+    required int productId,
+    required String movementType,
+    required int qty,
+    String? refNumber,
+    String operatorName = 'Admin',
+    String? note,
+  }) async {
+    final db = await database;
+    final prodRes = await db.query('pos_products', where: 'id = ?', whereArgs: [productId]);
+    if (prodRes.isEmpty) throw Exception('Produk tidak ditemukan');
+    final product = PosProduct.fromMap(prodRes.first);
+
+    final beforeStock = product.stok;
+    final afterStock = beforeStock + qty;
+
+    await db.update(
+      'pos_products',
+      {'stok': afterStock},
+      where: 'id = ?',
+      whereArgs: [productId],
+    );
+
+    final movement = PosStockMovement(
+      productId: productId,
+      productName: product.nama,
+      penitip: product.penitip,
+      movementType: movementType,
+      qty: qty,
+      beforeStock: beforeStock,
+      afterStock: afterStock,
+      refNumber: refNumber,
+      operatorName: operatorName,
+      note: note,
+      createdAt: DateTime.now(),
+    );
+
+    final id = await db.insert('pos_stock_movements', movement.toMap());
+    return PosStockMovement(
+      id: id,
+      productId: movement.productId,
+      productName: movement.productName,
+      penitip: movement.penitip,
+      movementType: movement.movementType,
+      qty: movement.qty,
+      beforeStock: movement.beforeStock,
+      afterStock: movement.afterStock,
+      refNumber: movement.refNumber,
+      operatorName: movement.operatorName,
+      note: movement.note,
+      createdAt: movement.createdAt,
+    );
+  }
+
+  /// Ambil riwayat pergerakan stok (Stock Movement Audit Ledger)
+  Future<List<PosStockMovement>> getStockMovements({int? productId, String? penitip}) async {
+    final db = await database;
+    String sql = '''
+      SELECT m.*, p.nama as product_name
+      FROM pos_stock_movements m
+      LEFT JOIN pos_products p ON m.product_id = p.id
+    ''';
+    List<dynamic> args = [];
+    List<String> whereClauses = [];
+
+    if (productId != null) {
+      whereClauses.add('m.product_id = ?');
+      args.add(productId);
+    }
+    if (penitip != null && penitip.isNotEmpty) {
+      whereClauses.add('m.penitip = ?');
+      args.add(penitip);
+    }
+
+    if (whereClauses.isNotEmpty) {
+      sql += ' WHERE ${whereClauses.join(' AND ')}';
+    }
+    sql += ' ORDER BY m.created_at DESC';
+
+    final res = await db.rawQuery(sql, args);
+    return res.map((m) => PosStockMovement.fromMap(m)).toList();
+  }
+
   Future<void> settleConsignment({
     required String penitip,
     required int totalQty,
@@ -1301,15 +1640,12 @@ class PosDatabaseService {
     required double storeFee,
     String? note,
   }) async {
-    final db = await database;
-    await db.insert('pos_consignment_settlements', {
-      'penitip': penitip,
-      'date_time': DateTime.now().toIso8601String(),
-      'total_qty': totalQty,
-      'total_due': totalDue,
-      'store_fee': storeFee,
-      'note': note,
-    });
+    await recordConsignmentPayment(
+      penitip: penitip,
+      amountPaid: totalDue,
+      paymentMethod: 'Tunai',
+      note: note ?? 'Pelunasan konsinyasi otomatis',
+    );
   }
 
   // ==========================================

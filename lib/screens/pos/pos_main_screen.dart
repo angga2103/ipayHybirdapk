@@ -78,26 +78,9 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Row(
-              children: [
-                const Text(
-                  'Kasir POS Offline',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Color(0xFF0F172A)),
-                ),
-                const SizedBox(width: 6),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
-                  decoration: BoxDecoration(
-                    color: AppConfig.primaryTeal.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: AppConfig.primaryTeal.withValues(alpha: 0.2)),
-                  ),
-                  child: Text(
-                    '100% NATIVE',
-                    style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: AppConfig.primaryTeal),
-                  ),
-                ),
-              ],
+            const Text(
+              'Kasir POS Offline',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Color(0xFF0F172A)),
             ),
             Text(
               'Database Lokal HP • Bebas Gangguan Sinyal',
@@ -154,6 +137,9 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
         ],
         bottom: TabBar(
           controller: _tabController,
+          isScrollable: true,
+          tabAlignment: TabAlignment.start,
+          labelPadding: const EdgeInsets.symmetric(horizontal: 14),
           labelColor: AppConfig.primaryTeal,
           unselectedLabelColor: const Color(0xFF64748B),
           indicatorColor: AppConfig.primaryTeal,
@@ -1882,10 +1868,17 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
   }
 
   // =========================================================================
-  // TAB 2: KONSINYASI (MANAJEMEN BARANG TITIPAN)
+  // TAB 2: KONSINYASI (MANAJEMEN BARANG TITIPAN & PEMBAYARAN PENITIP)
   // =========================================================================
   Widget _buildConsignmentTab(PosProvider pos) {
     final consignments = pos.consignments;
+
+    final totalGrossAll = consignments.fold(0.0, (sum, c) => sum + c.totalGross);
+    final totalDueAll = consignments.fold(0.0, (sum, c) => sum + c.totalDueToPenitip);
+    final totalSettledAll = consignments.fold(0.0, (sum, c) => sum + c.totalSettled);
+    final totalRemainingAll = consignments.fold(0.0, (sum, c) => sum + c.remainingDue);
+    final totalStockAll = consignments.fold(0, (sum, c) => sum + c.totalStock);
+    final totalSoldAll = consignments.fold(0, (sum, c) => sum + c.totalSoldQty);
 
     return RefreshIndicator(
       onRefresh: () => pos.refreshAll(),
@@ -1924,6 +1917,131 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
             ),
           ),
 
+          const SizedBox(height: 14),
+
+          // Dashboard Konsinyasi (Global Summary Metrics)
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+              boxShadow: [
+                BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 6, offset: const Offset(0, 2)),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Row(
+                  children: [
+                    Icon(Icons.dashboard_customize_outlined, size: 18, color: AppConfig.primaryTeal),
+                    SizedBox(width: 8),
+                    Text(
+                      'Ringkasan Keuangan Konsinyasi',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: totalRemainingAll > 0 ? const Color(0xFFFEF2F2) : const Color(0xFFECFDF5),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: totalRemainingAll > 0 ? const Color(0xFFFECACA) : const Color(0xFFA7F3D0),
+                          ),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'SISA HAK WAJIB DISETOR',
+                              style: TextStyle(
+                                fontSize: 9.5,
+                                fontWeight: FontWeight.w800,
+                                color: totalRemainingAll > 0 ? Colors.red.shade900 : const Color(0xFF065F46),
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              _currencyFormat.format(totalRemainingAll),
+                              style: TextStyle(
+                                fontSize: 15,
+                                fontWeight: FontWeight.w900,
+                                color: totalRemainingAll > 0 ? Colors.red.shade900 : const Color(0xFF047857),
+                              ),
+                            ),
+                            Text(
+                              totalRemainingAll > 0 ? 'Kewajiban aktif belum disetor' : 'Semua hak penitip telah lunas',
+                              style: TextStyle(
+                                fontSize: 9.5,
+                                color: totalRemainingAll > 0 ? Colors.red.shade700 : const Color(0xFF059669),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFFF0FDF4),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: const Color(0xFFBBF7D0)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'TOTAL SUDAH DISETORKAN',
+                              style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: Color(0xFF166534)),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              _currencyFormat.format(totalSettledAll),
+                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: Color(0xFF15803D)),
+                            ),
+                            const Text(
+                              'Riwayat pencairan penitip',
+                              style: TextStyle(fontSize: 9.5, color: Color(0xFF16A34A)),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF8FAFC),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceAround,
+                    children: [
+                      _buildConsignmentMiniStat('Omset Titipan', _currencyFormat.format(totalGrossAll)),
+                      Container(width: 1, height: 24, color: Colors.grey.shade300),
+                      _buildConsignmentMiniStat('Hak Penitip', _currencyFormat.format(totalDueAll)),
+                      Container(width: 1, height: 24, color: Colors.grey.shade300),
+                      _buildConsignmentMiniStat('Sisa Stok', '$totalStockAll pcs'),
+                      Container(width: 1, height: 24, color: Colors.grey.shade300),
+                      _buildConsignmentMiniStat('Terjual', '$totalSoldAll pcs'),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
           const SizedBox(height: 16),
 
           if (consignments.isEmpty)
@@ -1954,14 +2072,27 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
     );
   }
 
+  Widget _buildConsignmentMiniStat(String label, String value) {
+    return Column(
+      children: [
+        Text(label, style: const TextStyle(fontSize: 9.5, color: Color(0xFF64748B))),
+        const SizedBox(height: 2),
+        Text(value, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+      ],
+    );
+  }
+
   Widget _buildConsignmentCard(BuildContext context, PosProvider pos, ConsignmentSummary summary) {
+    final isLunas = summary.isPaidOff;
+    final isPartial = !isLunas && summary.totalSettled > 0;
+
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        border: Border.all(color: isLunas ? const Color(0xFFA7F3D0) : const Color(0xFFE2E8F0)),
         boxShadow: [
           BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 6, offset: const Offset(0, 2)),
         ],
@@ -1969,17 +2100,22 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // Header Penitip + Status Tagihan
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Row(
                 children: [
                   CircleAvatar(
-                    radius: 16,
-                    backgroundColor: Colors.amber.shade100,
+                    radius: 18,
+                    backgroundColor: isLunas ? const Color(0xFFDCFCE7) : Colors.amber.shade100,
                     child: Text(
                       summary.penitip.isNotEmpty ? summary.penitip[0].toUpperCase() : '?',
-                      style: TextStyle(fontWeight: FontWeight.w900, color: Colors.amber.shade900, fontSize: 13),
+                      style: TextStyle(
+                        fontWeight: FontWeight.w900,
+                        color: isLunas ? const Color(0xFF15803D) : Colors.amber.shade900,
+                        fontSize: 14,
+                      ),
                     ),
                   ),
                   const SizedBox(width: 10),
@@ -1998,19 +2134,44 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                   ),
                 ],
               ),
+              // Status Badge
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: summary.totalSoldQty > 0 ? const Color(0xFFECFDF5) : const Color(0xFFF1F5F9),
-                  borderRadius: BorderRadius.circular(6),
-                ),
-                child: Text(
-                  'Terjual: ${summary.totalSoldQty} pcs',
-                  style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
-                    color: summary.totalSoldQty > 0 ? const Color(0xFF047857) : const Color(0xFF64748B),
+                  color: isLunas
+                      ? const Color(0xFFDCFCE7)
+                      : (isPartial ? const Color(0xFFFEF3C7) : const Color(0xFFF1F5F9)),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isLunas
+                        ? const Color(0xFF86EFAC)
+                        : (isPartial ? const Color(0xFFFDE68A) : const Color(0xFFE2E8F0)),
                   ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      isLunas
+                          ? Icons.check_circle_rounded
+                          : (isPartial ? Icons.timelapse_rounded : Icons.pending_rounded),
+                      size: 13,
+                      color: isLunas
+                          ? const Color(0xFF15803D)
+                          : (isPartial ? Colors.amber.shade900 : const Color(0xFF64748B)),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      summary.paymentStatus,
+                      style: TextStyle(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        color: isLunas
+                            ? const Color(0xFF15803D)
+                            : (isPartial ? Colors.amber.shade900 : const Color(0xFF64748B)),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
@@ -2043,14 +2204,42 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                     Text(_currencyFormat.format(summary.storeFee), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF047857))),
                   ],
                 ),
+                const SizedBox(height: 4),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text('Total Hak Kotor Penitip:', style: TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+                    Text(_currencyFormat.format(summary.totalDueToPenitip), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                if (summary.totalSettled > 0) ...[
+                  const SizedBox(height: 4),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text('Sudah Disetorkan:', style: TextStyle(fontSize: 11, color: Color(0xFF059669))),
+                      Text(
+                        _currencyFormat.format(summary.totalSettled),
+                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF059669)),
+                      ),
+                    ],
+                  ),
+                ],
                 const Divider(height: 12, color: Color(0xFFE2E8F0)),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    const Text('HAK WAJIB DISETOR:', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w900, color: Color(0xFF0F172A))),
                     Text(
-                      _currencyFormat.format(summary.totalDueToPenitip),
-                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Colors.amber.shade900),
+                      isLunas ? 'STATUS SETORAN:' : 'SISA HAK WAJIB DISETOR:',
+                      style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w900, color: Color(0xFF0F172A)),
+                    ),
+                    Text(
+                      isLunas ? 'Rp 0 (Lunas)' : _currencyFormat.format(summary.remainingDue),
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w900,
+                        color: isLunas ? const Color(0xFF059669) : Colors.amber.shade900,
+                      ),
                     ),
                   ],
                 ),
@@ -2060,49 +2249,678 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
 
           const SizedBox(height: 12),
 
-          // Tombol Cetak Rekap Setoran
+          // Tombol Tindakan Konsinyasi
           Row(
             children: [
               Expanded(
                 child: ElevatedButton.icon(
-                  icon: const Icon(Icons.print, size: 16),
-                  label: const Text('Cetak Rekap Setoran (RPP02N)', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                  icon: Icon(isLunas ? Icons.check : Icons.payments_rounded, size: 16),
+                  label: Text(
+                    isLunas ? 'Setoran Lunas' : 'Bayar Setoran',
+                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
+                  ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.amber.shade700,
+                    backgroundColor: isLunas ? const Color(0xFF059669) : AppConfig.primaryTeal,
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
-                  onPressed: () async {
-                    final ok = await pos.printConsignmentReport(summary);
-                    if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          content: Text(ok ? '✅ Rekap ${summary.penitip} berhasil dicetak!' : '⚠️ Gagal mencetak. Cek koneksi printer.'),
-                          backgroundColor: ok ? AppConfig.primaryTeal : Colors.orange,
-                        ),
-                      );
-                    }
-                  },
+                  onPressed: isLunas
+                      ? () => _showConsignmentPaymentHistoryModal(context, pos, summary)
+                      : () => _showPayConsignmentDialog(context, pos, summary),
                 ),
               ),
               const SizedBox(width: 8),
-              OutlinedButton(
+              ElevatedButton.icon(
+                icon: const Icon(Icons.print, size: 16),
+                label: const Text('Rekap', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.amber.shade700,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
                 onPressed: () async {
-                  await pos.settleConsignment(summary: summary, andPrint: false);
+                  final ok = await pos.printConsignmentReport(summary);
                   if (context.mounted) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('✅ Setoran ${summary.penitip} ditandai lunas!')),
+                      SnackBar(
+                        content: Text(ok ? '✅ Rekap ${summary.penitip} berhasil dicetak!' : '⚠️ Gagal mencetak. Cek koneksi printer.'),
+                        backgroundColor: ok ? AppConfig.primaryTeal : Colors.orange,
+                      ),
                     );
                   }
                 },
-                style: OutlinedButton.styleFrom(
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.history_rounded, size: 14),
+                  label: const Text('Riwayat Setoran', style: TextStyle(fontSize: 11)),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    visualDensity: VisualDensity.compact,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: () => _showConsignmentPaymentHistoryModal(context, pos, summary),
                 ),
-                child: const Text('Tandai Lunas', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+              ),
+              const SizedBox(width: 6),
+              Expanded(
+                child: OutlinedButton.icon(
+                  icon: const Icon(Icons.add_shopping_cart_rounded, size: 14),
+                  label: const Text('Tambah Stok', style: TextStyle(fontSize: 11)),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 6),
+                    visualDensity: VisualDensity.compact,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: () => _showAddConsignmentStockDialog(context, pos, summary),
+                ),
+              ),
+              const SizedBox(width: 6),
+              OutlinedButton.icon(
+                icon: const Icon(Icons.inventory_2_outlined, size: 14),
+                label: const Text('Produk', style: TextStyle(fontSize: 11)),
+                style: OutlinedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  visualDensity: VisualDensity.compact,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                onPressed: () => _showConsignmentProductListModal(context, pos, summary),
               ),
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  void _showPayConsignmentDialog(BuildContext context, PosProvider pos, ConsignmentSummary summary) {
+    bool isFull = true;
+    final nominalCtrl = TextEditingController(text: summary.remainingDue.toInt().toString());
+    final noteCtrl = TextEditingController();
+    String paymentMethod = 'Tunai';
+    bool andPrint = true;
+
+    showDialog(
+      context: context,
+      builder: (dCtx) => StatefulBuilder(
+        builder: (context, setDState) {
+          final activeShift = pos.activeShift;
+          final cashierName = activeShift?.cashierName ?? pos.cashierName;
+
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            title: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: AppConfig.primaryLight,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.payments_rounded, color: AppConfig.primaryTeal, size: 22),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text('Bayar Setoran Hak Penitip', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                      Text('Mitra: ${summary.penitip}', style: const TextStyle(fontSize: 11.5, color: Color(0xFF64748B))),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: const Color(0xFFE2E8F0)),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Sisa Tagihan Hak:', style: TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                        Text(
+                          _currencyFormat.format(summary.remainingDue),
+                          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: Colors.amber.shade900),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  const Text('Opsi Pembayaran:', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ChoiceChip(
+                          label: const Text('Lunas Penuh', style: TextStyle(fontSize: 11)),
+                          selected: isFull,
+                          selectedColor: AppConfig.primaryLight,
+                          onSelected: (val) {
+                            if (val) {
+                              setDState(() {
+                                isFull = true;
+                                nominalCtrl.text = summary.remainingDue.toInt().toString();
+                              });
+                            }
+                          },
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: ChoiceChip(
+                          label: const Text('Bayar Sebagian', style: TextStyle(fontSize: 11)),
+                          selected: !isFull,
+                          selectedColor: AppConfig.primaryLight,
+                          onSelected: (val) {
+                            if (val) {
+                              setDState(() {
+                                isFull = false;
+                              });
+                            }
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: nominalCtrl,
+                    keyboardType: TextInputType.number,
+                    enabled: !isFull,
+                    decoration: InputDecoration(
+                      labelText: 'Nominal yang Dibayarkan (Rp)',
+                      prefixText: 'Rp ',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  const Text('Metode Pembayaran:', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  DropdownButtonFormField<String>(
+                    initialValue: paymentMethod,
+                    decoration: InputDecoration(
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    ),
+                    items: const [
+                      DropdownMenuItem(value: 'Tunai', child: Text('Uang Tunai (Kas Laci Kasir)')),
+                      DropdownMenuItem(value: 'Transfer', child: Text('Transfer Bank / Non-Tunai')),
+                    ],
+                    onChanged: (val) {
+                      if (val != null) setDState(() => paymentMethod = val);
+                    },
+                  ),
+                  const SizedBox(height: 10),
+                  TextField(
+                    controller: noteCtrl,
+                    decoration: InputDecoration(
+                      labelText: 'Catatan / Keterangan (Opsional)',
+                      hintText: 'Misal: Setoran mingguan penjualan roti',
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  if (paymentMethod == 'Tunai')
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFFFFBEB),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFFFDE68A)),
+                      ),
+                      child: Row(
+                        children: [
+                          const Icon(Icons.info_outline, color: Color(0xFFD97706), size: 16),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Uang tunai akan otomatis dipotong dari kas laci kasir (Shift aktif: $cashierName).',
+                              style: const TextStyle(fontSize: 10.5, color: Color(0xFF92400E)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  const SizedBox(height: 8),
+                  CheckboxListTile(
+                    value: andPrint,
+                    contentPadding: EdgeInsets.zero,
+                    dense: true,
+                    title: const Text('Cetak bukti pembayaran ke printer kasir', style: TextStyle(fontSize: 11.5)),
+                    onChanged: (val) => setDState(() => andPrint = val ?? true),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dCtx),
+                child: const Text('Batal'),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppConfig.primaryTeal,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                onPressed: () async {
+                  final payVal = double.tryParse(nominalCtrl.text.replaceAll('.', '').replaceAll(',', '')) ?? 0.0;
+                  if (payVal <= 0) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('⚠️ Masukkan nominal pembayaran yang valid')),
+                    );
+                    return;
+                  }
+                  if (payVal > summary.remainingDue) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('⚠️ Nominal melebihi sisa tagihan (${_currencyFormat.format(summary.remainingDue)})')),
+                    );
+                    return;
+                  }
+
+                  Navigator.pop(dCtx);
+                  final payment = await pos.settleConsignmentPayment(
+                    penitip: summary.penitip,
+                    amountPaid: payVal,
+                    paymentMethod: paymentMethod,
+                    cashierName: cashierName,
+                    note: noteCtrl.text.trim().isNotEmpty ? noteCtrl.text.trim() : null,
+                    andPrint: andPrint,
+                  );
+
+                  if (payment != null && context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('✅ Pembayaran Rp ${NumberFormat("#,###", "id_ID").format(payVal)} ke ${summary.penitip} berhasil dicatat! Status: ${payment.paymentStatus}'),
+                        backgroundColor: AppConfig.primaryTeal,
+                      ),
+                    );
+                  }
+                },
+                child: const Text('Konfirmasi Bayar'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  void _showConsignmentPaymentHistoryModal(BuildContext context, PosProvider pos, ConsignmentSummary summary) async {
+    final payments = await pos.getPaymentsForPenitip(summary.penitip);
+
+    if (!context.mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (bCtx) => Container(
+        height: MediaQuery.of(context).size.height * 0.75,
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Riwayat Setoran: ${summary.penitip}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                    Text('Total disetor: ${_currencyFormat.format(summary.totalSettled)} • Sisa: ${_currencyFormat.format(summary.remainingDue)}',
+                        style: const TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+                  ],
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(bCtx),
+                ),
+              ],
+            ),
+            const Divider(height: 16),
+            Expanded(
+              child: payments.isEmpty
+                  ? Center(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.receipt_long_outlined, size: 48, color: Colors.grey.shade300),
+                          const SizedBox(height: 8),
+                          Text('Belum ada riwayat pembayaran untuk ${summary.penitip}', style: TextStyle(color: Colors.grey.shade500, fontSize: 12)),
+                        ],
+                      ),
+                    )
+                  : ListView.separated(
+                      itemCount: payments.length,
+                      separatorBuilder: (_, _) => const Divider(height: 1),
+                      itemBuilder: (_, idx) {
+                        final pay = payments[idx];
+                        return ListTile(
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                          leading: CircleAvatar(
+                            backgroundColor: pay.paymentStatus == 'LUNAS' ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7),
+                            child: Icon(
+                              pay.paymentStatus == 'LUNAS' ? Icons.check_circle : Icons.timelapse,
+                              color: pay.paymentStatus == 'LUNAS' ? const Color(0xFF15803D) : Colors.amber.shade900,
+                              size: 20,
+                            ),
+                          ),
+                          title: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(_currencyFormat.format(pay.amountPaid), style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: pay.paymentStatus == 'LUNAS' ? const Color(0xFFDCFCE7) : const Color(0xFFFEF3C7),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  pay.paymentStatus,
+                                  style: TextStyle(
+                                    fontSize: 9.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: pay.paymentStatus == 'LUNAS' ? const Color(0xFF15803D) : Colors.amber.shade900,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          subtitle: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const SizedBox(height: 2),
+                              Text('${DateFormat("dd MMM yyyy HH:mm").format(pay.createdAt)} • Kasir: ${pay.cashierName} • ${pay.paymentMethod}',
+                                  style: const TextStyle(fontSize: 10.5, color: Color(0xFF64748B))),
+                              if (pay.note != null && pay.note!.isNotEmpty)
+                                Text('Catatan: ${pay.note}', style: const TextStyle(fontSize: 10.5, fontStyle: FontStyle.italic)),
+                              Text('No. Bukti: ${pay.paymentNo}', style: const TextStyle(fontSize: 9.5, color: Color(0xFF94A3B8))),
+                            ],
+                          ),
+                          trailing: IconButton(
+                            icon: const Icon(Icons.print, size: 18, color: AppConfig.primaryTeal),
+                            tooltip: 'Cetak Ulang Bukti',
+                            onPressed: () async {
+                              await PrinterService.instance.printConsignmentPaymentReceipt(pay, storeName: pos.storeName);
+                            },
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showAddConsignmentStockDialog(BuildContext context, PosProvider pos, ConsignmentSummary summary) async {
+    final prods = await pos.getProductsForPenitip(summary.penitip);
+    if (!context.mounted) return;
+
+    if (prods.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('⚠️ Tidak ditemukan produk terdaftar untuk penitip ${summary.penitip}')),
+      );
+      return;
+    }
+
+    PosProduct selectedProd = prods.first;
+    final qtyCtrl = TextEditingController(text: '10');
+    final docCtrl = TextEditingController();
+    final opCtrl = TextEditingController(text: pos.activeShift?.cashierName ?? pos.cashierName);
+    final noteCtrl = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (dCtx) => StatefulBuilder(
+        builder: (context, setDState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(color: AppConfig.primaryLight, borderRadius: BorderRadius.circular(10)),
+                child: const Icon(Icons.add_box_rounded, color: AppConfig.primaryTeal, size: 22),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Penerimaan Stok Titipan', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                    Text('Penitip: ${summary.penitip}', style: const TextStyle(fontSize: 11.5, color: Color(0xFF64748B))),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text('Pilih Produk Titipan:', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 6),
+                DropdownButtonFormField<PosProduct>(
+                  initialValue: selectedProd,
+                  isExpanded: true,
+                  decoration: InputDecoration(
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  ),
+                  items: prods
+                      .map((p) => DropdownMenuItem(
+                            value: p,
+                            child: Text('${p.nama} (Stok: ${p.stok})', style: const TextStyle(fontSize: 12)),
+                          ))
+                      .toList(),
+                  onChanged: (val) {
+                    if (val != null) setDState(() => selectedProd = val);
+                  },
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: qtyCtrl,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: 'Jumlah Stok Masuk (Pcs)',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: docCtrl,
+                  decoration: InputDecoration(
+                    labelText: 'No. Dokumen / Surat Jalan (Opsional)',
+                    hintText: 'Misal: SJ-2026/11/001',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: opCtrl,
+                  decoration: InputDecoration(
+                    labelText: 'Penerima / Operator',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: noteCtrl,
+                  decoration: InputDecoration(
+                    labelText: 'Catatan Batch / Kondisi Barang',
+                    hintText: 'Misal: Kondisi baik, batch baru',
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dCtx),
+              child: const Text('Batal'),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppConfig.primaryTeal,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              ),
+              onPressed: () async {
+                final qty = int.tryParse(qtyCtrl.text.trim()) ?? 0;
+                if (qty <= 0) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('⚠️ Masukkan jumlah stok masuk yang valid')),
+                  );
+                  return;
+                }
+
+                Navigator.pop(dCtx);
+                final mov = await pos.addConsignmentStock(
+                  productId: selectedProd.id!,
+                  qty: qty,
+                  refNumber: docCtrl.text.trim().isNotEmpty ? docCtrl.text.trim() : null,
+                  operatorName: opCtrl.text.trim().isNotEmpty ? opCtrl.text.trim() : 'Admin',
+                  note: noteCtrl.text.trim().isNotEmpty ? noteCtrl.text.trim() : null,
+                );
+
+                if (mov != null && context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('✅ Stok ${selectedProd.nama} berhasil ditambah +$qty pcs (Total: ${mov.afterStock} pcs)'),
+                      backgroundColor: AppConfig.primaryTeal,
+                    ),
+                  );
+                }
+              },
+              child: const Text('Tambah Stok'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showConsignmentProductListModal(BuildContext context, PosProvider pos, ConsignmentSummary summary) async {
+    final prods = await pos.getProductsForPenitip(summary.penitip);
+    if (!context.mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (bCtx) => Container(
+        height: MediaQuery.of(context).size.height * 0.7,
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(2)),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Katalog Barang: ${summary.penitip}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                    Text('${prods.length} Produk Titipan • Sisa Stok: ${summary.totalStock} pcs',
+                        style: const TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+                  ],
+                ),
+                IconButton(
+                  icon: const Icon(Icons.close),
+                  onPressed: () => Navigator.pop(bCtx),
+                ),
+              ],
+            ),
+            const Divider(height: 16),
+            Expanded(
+              child: prods.isEmpty
+                  ? const Center(child: Text('Tidak ada produk titipan'))
+                  : ListView.separated(
+                      itemCount: prods.length,
+                      separatorBuilder: (_, _) => const Divider(height: 1),
+                      itemBuilder: (_, idx) {
+                        final p = prods[idx];
+                        final margin = p.hargaJual - p.hargaDasar;
+                        return ListTile(
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+                          leading: CircleAvatar(
+                            backgroundColor: AppConfig.primaryLight,
+                            child: const Icon(Icons.inventory_2_outlined, color: AppConfig.primaryTeal, size: 20),
+                          ),
+                          title: Text(p.nama, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
+                          subtitle: Text(
+                            '${p.kode} • Harga Jual: ${_currencyFormat.format(p.hargaJual)} • Hak Penitip: ${_currencyFormat.format(p.hargaDasar)} • Komisi Toko: ${_currencyFormat.format(margin)}',
+                            style: const TextStyle(fontSize: 10.5, color: Color(0xFF64748B)),
+                          ),
+                          trailing: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: p.stok > 0 ? const Color(0xFFECFDF5) : const Color(0xFFFEF2F2),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Text(
+                              'Stok: ${p.stok}',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: p.stok > 0 ? const Color(0xFF047857) : Colors.red,
+                              ),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
       ),
     );
   }
