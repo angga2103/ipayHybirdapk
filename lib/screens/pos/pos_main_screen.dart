@@ -16,12 +16,15 @@ import '../../services/app_update_service.dart';
 import '../../services/pos_database_service.dart';
 import '../../services/pos_image_service.dart';
 import '../../services/pos_product_helper.dart';
+import 'package:flutter/services.dart';
 import '../../services/pos_whatsapp_service.dart';
 import '../printer_settings_screen.dart';
 import 'pos_scanner_modal.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../../models/pos_debt.dart';
 import '../../services/pos_backup_service.dart';
+import '../../services/pos_keyboard_handler.dart';
+import '../../services/scanner_feedback_service.dart';
 
 class PosMainScreen extends StatefulWidget {
   const PosMainScreen({super.key});
@@ -33,6 +36,9 @@ class PosMainScreen extends StatefulWidget {
 class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
   final TextEditingController _searchCtrl = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
+  final PosKeyboardHandler _keyboardHandler = PosKeyboardHandler();
+  int _selectedCartIndex = 0;
   final TextEditingController _historyInvoiceCtrl = TextEditingController();
   final NumberFormat _currencyFormat = NumberFormat.currency(
     locale: 'id_ID',
@@ -44,14 +50,458 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
   void initState() {
     super.initState();
     _tabController = TabController(length: 5, vsync: this);
+    HardwareKeyboard.instance.addHandler(_handleGlobalKeyEvent);
   }
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleGlobalKeyEvent);
     _tabController.dispose();
     _searchCtrl.dispose();
+    _searchFocusNode.dispose();
     _historyInvoiceCtrl.dispose();
     super.dispose();
+  }
+
+  // =========================================================================
+  // LOGIKA PINTASAN KEYBOARD (KEYBOARD-FIRST POS) & SCANNER HARDWARE WEDGE
+  // =========================================================================
+  bool _handleGlobalKeyEvent(KeyEvent event) {
+    if (event is! KeyDownEvent) return false;
+
+    // 1. Cek Scanner Hardware Barcode Wedge (burst keystrokes < 60ms diakhiri Enter)
+    final scannedBarcode = _keyboardHandler.processScannerKeystroke(event);
+    if (scannedBarcode != null) {
+      final pos = context.read<PosProvider>();
+      final product = pos.findProductByBarcode(scannedBarcode);
+      if (product != null) {
+        final ok = pos.addToCart(product);
+        if (ok) {
+          ScannerFeedbackService.playScanSuccess();
+          if (mounted) {
+            ScaffoldMessenger.of(context).hideCurrentSnackBar();
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('✅ Barcode: ${product.nama} (+1 di keranjang)'),
+                duration: const Duration(milliseconds: 900),
+                backgroundColor: AppConfig.primaryTeal,
+              ),
+            );
+          }
+        } else {
+          ScannerFeedbackService.playScanError();
+          if (mounted) {
+            ScaffoldMessenger.of(context).hideCurrentSnackBar();
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('⚠️ Stok "${product.nama}" tidak mencukupi!'),
+                duration: const Duration(seconds: 1),
+                backgroundColor: Colors.red.shade700,
+              ),
+            );
+          }
+        }
+      } else {
+        ScannerFeedbackService.playScanError();
+        if (mounted) {
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('⚠️ Produk barcode "$scannedBarcode" tidak ditemukan!'),
+              duration: const Duration(seconds: 2),
+              backgroundColor: Colors.red.shade700,
+            ),
+          );
+        }
+      }
+      return true;
+    }
+
+    final key = event.logicalKey;
+    final isCtrl = HardwareKeyboard.instance.isControlPressed || HardwareKeyboard.instance.isMetaPressed;
+    final isShift = HardwareKeyboard.instance.isShiftPressed;
+
+    // 2. Navigasi Global Berbasis Ctrl (Ctrl+1 s/d Ctrl+5 & Ctrl+P)
+    if (isCtrl) {
+      if (key == LogicalKeyboardKey.digit1 || key == LogicalKeyboardKey.numpad1) {
+        _tabController.animateTo(0);
+        return true;
+      }
+      if (key == LogicalKeyboardKey.digit2 || key == LogicalKeyboardKey.numpad2) {
+        _tabController.animateTo(1);
+        return true;
+      }
+      if (key == LogicalKeyboardKey.digit3 || key == LogicalKeyboardKey.numpad3) {
+        _tabController.animateTo(2);
+        return true;
+      }
+      if (key == LogicalKeyboardKey.digit4 || key == LogicalKeyboardKey.numpad4) {
+        _tabController.animateTo(3);
+        return true;
+      }
+      if (key == LogicalKeyboardKey.digit5 || key == LogicalKeyboardKey.numpad5) {
+        _tabController.animateTo(4);
+        return true;
+      }
+      if (key == LogicalKeyboardKey.keyP) {
+        final pos = context.read<PosProvider>();
+        _reprintLastReceiptWithFeedback(pos);
+        return true;
+      }
+    }
+
+    // 3. Tombol Fungsi Universal (F1 s/d F9) - Berfungsi di mana saja
+    if (key == LogicalKeyboardKey.f1) {
+      PosKeyboardHandler.showShortcutGuideDialog(context);
+      return true;
+    }
+    if (key == LogicalKeyboardKey.f2) {
+      _focusSearchField();
+      return true;
+    }
+    if (key == LogicalKeyboardKey.f3) {
+      final pos = context.read<PosProvider>();
+      _showCustomerPickerModal(context, pos);
+      return true;
+    }
+    if (key == LogicalKeyboardKey.f4) {
+      final pos = context.read<PosProvider>();
+      if (isShift) {
+        _showHoldCartsSheet(context, pos);
+      } else {
+        _handleHoldCartShortcut(pos);
+      }
+      return true;
+    }
+    if (key == LogicalKeyboardKey.f5) {
+      final pos = context.read<PosProvider>();
+      if (!pos.hasActiveShift) {
+        _showShiftRequiredDialog(context, pos, actionTitle: 'Transaksi Penjualan');
+      } else if (pos.cart.isEmpty) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('⚠️ Keranjang masih kosong. Pilih atau scan produk terlebih dahulu.'),
+            duration: Duration(seconds: 1),
+          ),
+        );
+      } else {
+        _openPaymentModal(context, pos);
+      }
+      return true;
+    }
+    if (key == LogicalKeyboardKey.f7) {
+      final pos = context.read<PosProvider>();
+      if (!pos.hasActiveShift) {
+        _showShiftRequiredDialog(context, pos, actionTitle: 'Arus Kas Operasional');
+      } else {
+        _showAddCashFlowDialog(context, pos);
+      }
+      return true;
+    }
+    if (key == LogicalKeyboardKey.f8) {
+      _kickCashDrawerWithFeedback();
+      return true;
+    }
+    if (key == LogicalKeyboardKey.f9) {
+      final pos = context.read<PosProvider>();
+      if (!pos.hasActiveShift) {
+        _showOpenShiftDialog(context, pos);
+      } else {
+        _showCloseShiftDialog(context, pos);
+      }
+      return true;
+    }
+
+    // 4. Periksa apakah pengguna sedang aktif mengetik di TextField
+    final primaryFocus = FocusManager.instance.primaryFocus;
+    final isEditingText = primaryFocus != null &&
+        (primaryFocus.context?.widget is EditableText ||
+            primaryFocus.debugLabel?.contains('EditableText') == true);
+
+    if (isEditingText) {
+      // Jika menekan Escape saat sedang mengetik, lepas fokus
+      if (key == LogicalKeyboardKey.escape) {
+        primaryFocus.unfocus();
+        return true;
+      }
+      // Jangan interupsi pengetikan normal karakter pengguna
+      return false;
+    }
+
+    // 5. Pintasan Cepat saat TIDAK sedang fokus mengetik
+    if (key == LogicalKeyboardKey.slash) {
+      _focusSearchField();
+      return true;
+    }
+
+    final pos = context.read<PosProvider>();
+
+    // Tombol Space untuk Membuka Pembayaran Cepat
+    if (key == LogicalKeyboardKey.space) {
+      if (pos.cart.isNotEmpty) {
+        if (!pos.hasActiveShift) {
+          _showShiftRequiredDialog(context, pos, actionTitle: 'Transaksi Penjualan');
+        } else {
+          _openPaymentModal(context, pos);
+        }
+        return true;
+      }
+    }
+
+    // Pintasan Keranjang Belanja Aktif
+    if (pos.cart.isNotEmpty) {
+      if (key == LogicalKeyboardKey.arrowDown) {
+        setState(() {
+          _selectedCartIndex = (_selectedCartIndex + 1).clamp(0, pos.cart.length - 1);
+        });
+        return true;
+      }
+      if (key == LogicalKeyboardKey.arrowUp) {
+        setState(() {
+          _selectedCartIndex = (_selectedCartIndex - 1).clamp(0, pos.cart.length - 1);
+        });
+        return true;
+      }
+      if (key == LogicalKeyboardKey.add ||
+          key == LogicalKeyboardKey.numpadAdd ||
+          (key == LogicalKeyboardKey.equal && isShift)) {
+        _incrementSelectedCartItem(pos);
+        return true;
+      }
+      if (key == LogicalKeyboardKey.minus || key == LogicalKeyboardKey.numpadSubtract) {
+        _decrementSelectedCartItem(pos);
+        return true;
+      }
+      if (key == LogicalKeyboardKey.asterisk || key == LogicalKeyboardKey.numpadMultiply) {
+        _promptChangeQtyDirectly(pos);
+        return true;
+      }
+      if (key == LogicalKeyboardKey.delete || key == LogicalKeyboardKey.backspace) {
+        _removeSelectedCartItem(pos);
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  void _focusSearchField() {
+    _tabController.animateTo(0);
+    _searchFocusNode.requestFocus();
+    _searchCtrl.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: _searchCtrl.text.length,
+    );
+  }
+
+  void _handleHoldCartShortcut(PosProvider pos) async {
+    if (pos.cart.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('⚠️ Keranjang belanja kosong, tidak ada transaksi untuk ditahan.'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+      return;
+    }
+    final ok = await pos.holdCurrentCart(note: 'Antrean #${pos.holdCartsCount + 1}');
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(ok
+              ? '⏸️ Transaksi ditahan ke dalam antrean (Shift+F4 untuk buka)'
+              : '⚠️ Gagal menahan transaksi.'),
+          backgroundColor: ok ? Colors.amber.shade800 : Colors.red,
+        ),
+      );
+    }
+  }
+
+  void _incrementSelectedCartItem(PosProvider pos) {
+    if (pos.cart.isEmpty) return;
+    final idx = _selectedCartIndex.clamp(0, pos.cart.length - 1);
+    final item = pos.cart[idx];
+    final canAddMore = !item.product.isStockManaged || (item.qty + 1) <= item.product.stok;
+    if (canAddMore) {
+      pos.updateCartQty(idx, 1);
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('➕ "${item.product.nama}" Qty: ${item.qty + 1}'),
+          duration: const Duration(milliseconds: 700),
+          backgroundColor: AppConfig.primaryTeal,
+        ),
+      );
+    } else {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('⚠️ Maksimal stok "${item.product.nama}" (${item.product.stok})'),
+          duration: const Duration(seconds: 1),
+          backgroundColor: Colors.orange.shade800,
+        ),
+      );
+    }
+  }
+
+  void _decrementSelectedCartItem(PosProvider pos) {
+    if (pos.cart.isEmpty) return;
+    final idx = _selectedCartIndex.clamp(0, pos.cart.length - 1);
+    final item = pos.cart[idx];
+    if (item.qty > 1) {
+      pos.updateCartQty(idx, -1);
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('➖ "${item.product.nama}" Qty: ${item.qty - 1}'),
+          duration: const Duration(milliseconds: 700),
+        ),
+      );
+    } else {
+      _removeSelectedCartItem(pos);
+    }
+  }
+
+  void _removeSelectedCartItem(PosProvider pos) {
+    if (pos.cart.isEmpty) return;
+    final idx = _selectedCartIndex.clamp(0, pos.cart.length - 1);
+    final name = pos.cart[idx].product.nama;
+    pos.removeCartItem(idx);
+    setState(() {
+      _selectedCartIndex = (_selectedCartIndex - 1).clamp(0, (pos.cart.length - 1).clamp(0, 999));
+    });
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('🗑️ "$name" dihapus dari keranjang'),
+        duration: const Duration(milliseconds: 800),
+      ),
+    );
+  }
+
+  void _promptChangeQtyDirectly(PosProvider pos) {
+    if (pos.cart.isEmpty) return;
+    final idx = _selectedCartIndex.clamp(0, pos.cart.length - 1);
+    final item = pos.cart[idx];
+    final qtyCtrl = TextEditingController(text: item.qty.toString());
+
+    showDialog(
+      context: context,
+      builder: (dlgCtx) => AlertDialog(
+        title: Text('Ubah Jumlah (Qty) - ${item.product.nama}',
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+        content: TextField(
+          controller: qtyCtrl,
+          keyboardType: TextInputType.number,
+          autofocus: true,
+          decoration: InputDecoration(
+            labelText: 'Jumlah Qty (${item.product.unit})',
+            border: const OutlineInputBorder(),
+          ),
+          onSubmitted: (val) {
+            final target = int.tryParse(val);
+            if (target != null && target >= 0) {
+              pos.setProductCartQty(item.product, target);
+              Navigator.pop(dlgCtx);
+            }
+          },
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(dlgCtx), child: const Text('Batal')),
+          ElevatedButton(
+            onPressed: () {
+              final target = int.tryParse(qtyCtrl.text);
+              if (target != null && target >= 0) {
+                pos.setProductCartQty(item.product, target);
+                Navigator.pop(dlgCtx);
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppConfig.primaryTeal,
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Simpan'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _reprintLastReceiptWithFeedback(PosProvider pos) async {
+    final ok = await pos.reprintLastTransaction();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(ok
+              ? '🖨️ Mencetak ulang struk transaksi terakhir...'
+              : '⚠️ Gagal mencetak: ${pos.errorMessage ?? "Belum ada transaksi"}'),
+          backgroundColor: ok ? AppConfig.primaryTeal : Colors.orange.shade800,
+        ),
+      );
+    }
+  }
+
+  Future<void> _kickCashDrawerWithFeedback() async {
+    final ok = await PrinterService.instance.openCashDrawer();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(ok
+              ? '💰 Perintah buka laci kasir (Kick Drawer) terkirim!'
+              : '⚠️ Tidak dapat membuka laci kasir. Pastikan printer terhubung.'),
+          duration: const Duration(seconds: 2),
+          backgroundColor: ok ? const Color(0xFF047857) : Colors.orange.shade800,
+        ),
+      );
+    }
+  }
+
+  void _handleSearchSubmit(String query, PosProvider pos) {
+    final clean = query.trim();
+    if (clean.isEmpty) return;
+    final product = pos.findProductByBarcode(clean);
+    if (product != null) {
+      final ok = pos.addToCart(product);
+      if (ok) {
+        ScannerFeedbackService.playScanSuccess();
+        _searchCtrl.clear();
+        pos.search('');
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ ${product.nama} ditambahkan ke keranjang'),
+            duration: const Duration(seconds: 1),
+            backgroundColor: AppConfig.primaryTeal,
+          ),
+        );
+      } else {
+        ScannerFeedbackService.playScanError();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('⚠️ Stok "${product.nama}" tidak mencukupi!'),
+            backgroundColor: Colors.red.shade700,
+          ),
+        );
+      }
+    } else if (pos.filteredProducts.length == 1) {
+      final onlyProduct = pos.filteredProducts.first;
+      final ok = pos.addToCart(onlyProduct);
+      if (ok) {
+        ScannerFeedbackService.playScanSuccess();
+        _searchCtrl.clear();
+        pos.search('');
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ ${onlyProduct.nama} ditambahkan ke keranjang'),
+            duration: const Duration(seconds: 1),
+            backgroundColor: AppConfig.primaryTeal,
+          ),
+        );
+      } else {
+        ScannerFeedbackService.playScanError();
+      }
+    }
   }
 
   bool _isSameDay(DateTime? a, DateTime? b) {
@@ -89,10 +539,22 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
           ],
         ),
         actions: [
+          // Tombol Panduan Lengkap Pintasan Keyboard (F1)
+          IconButton(
+            icon: const Icon(Icons.keyboard_rounded, color: AppConfig.primaryTeal, size: 22),
+            tooltip: 'Panduan Pintasan Keyboard (F1)',
+            onPressed: () => PosKeyboardHandler.showShortcutGuideDialog(context),
+          ),
+          // Tombol Buka Laci Kasir Cepat (F8)
+          IconButton(
+            icon: const Icon(Icons.point_of_sale_rounded, color: Color(0xFF475569), size: 20),
+            tooltip: 'Buka Laci Kasir (F8)',
+            onPressed: () => _kickCashDrawerWithFeedback(),
+          ),
           // Tombol Pintas Master Data Pelanggan
           IconButton(
             icon: const Icon(Icons.people_alt_rounded, color: AppConfig.primaryTeal, size: 22),
-            tooltip: 'Data Pelanggan & Kasbon',
+            tooltip: 'Data Pelanggan & Kasbon (Ctrl+2)',
             onPressed: () => _tabController.animateTo(1),
           ),
           // Indikator Status Printer
@@ -147,11 +609,11 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
           labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
           unselectedLabelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
           tabs: const [
-            Tab(icon: Icon(Icons.point_of_sale, size: 20), text: 'Kasir'),
-            Tab(icon: Icon(Icons.people_alt_outlined, size: 20), text: 'Pelanggan'),
-            Tab(icon: Icon(Icons.handshake_outlined, size: 20), text: 'Konsinyasi'),
-            Tab(icon: Icon(Icons.table_view, size: 20), text: 'Produk/Excel'),
-            Tab(icon: Icon(Icons.receipt_long, size: 20), text: 'Riwayat/Laba'),
+            Tab(icon: Icon(Icons.point_of_sale, size: 20), text: 'Kasir [Ctrl+1]'),
+            Tab(icon: Icon(Icons.people_alt_outlined, size: 20), text: 'Pelanggan [Ctrl+2]'),
+            Tab(icon: Icon(Icons.handshake_outlined, size: 20), text: 'Konsinyasi [Ctrl+3]'),
+            Tab(icon: Icon(Icons.table_view, size: 20), text: 'Produk [Ctrl+4]'),
+            Tab(icon: Icon(Icons.receipt_long, size: 20), text: 'Riwayat [Ctrl+5]'),
           ],
         ),
       ),
@@ -202,10 +664,12 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                           ),
                           child: TextField(
                             controller: _searchCtrl,
+                            focusNode: _searchFocusNode,
                             onChanged: (val) => pos.search(val),
+                            onSubmitted: (val) => _handleSearchSubmit(val, pos),
                             style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
                             decoration: InputDecoration(
-                              hintText: 'Cari nama barang atau kode produk...',
+                              hintText: 'Cari nama barang / barcode... (F2 atau /)',
                               hintStyle: TextStyle(fontSize: 13, color: Colors.grey.shade500),
                               prefixIcon: const Icon(Icons.search, size: 20, color: Color(0xFF64748B)),
                               suffixIcon: _searchCtrl.text.isNotEmpty
@@ -281,7 +745,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
-                                '${pos.holdCartsCount} Transaksi Ditahan (Antrean)',
+                                '${pos.holdCartsCount} Transaksi Ditahan (Shift+F4)',
                                 style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: Colors.amber.shade900),
                               ),
                             ),
@@ -292,7 +756,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: const Text(
-                                'Buka / Pulihkan',
+                                'Buka [Shift+F4]',
                                 style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w900, color: Colors.white),
                               ),
                             ),
@@ -946,7 +1410,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                             OutlinedButton.icon(
                               onPressed: () => _promptHoldCart(context, pos, ctx),
                               icon: const Icon(Icons.pause_circle_outline, size: 15, color: Color(0xFFB45309)),
-                              label: const Text('Tahan', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFB45309))),
+                              label: const Text('Tahan [F4]', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFB45309))),
                               style: OutlinedButton.styleFrom(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                 side: BorderSide(color: Colors.amber.shade400),
@@ -1051,7 +1515,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                               elevation: 2,
                             ),
                             child: const Text(
-                              'Lanjut Pembayaran (F8)',
+                              'Lanjut Pembayaran [F5]',
                               style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
                             ),
                           ),
@@ -1069,7 +1533,21 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
   }
 
   Widget _buildCartRow(BuildContext context, PosProvider pos, int idx, PosCartItem item, StateSetter setModalState) {
-    return Row(
+    final isSelected = _selectedCartIndex == idx;
+    return InkWell(
+      onTap: () {
+        setState(() => _selectedCartIndex = idx);
+        setModalState(() {});
+      },
+      borderRadius: BorderRadius.circular(10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        decoration: BoxDecoration(
+          color: isSelected ? AppConfig.primaryTeal.withValues(alpha: 0.08) : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+          border: isSelected ? Border.all(color: AppConfig.primaryTeal.withValues(alpha: 0.4), width: 1.5) : null,
+        ),
+        child: Row(
       children: [
         Expanded(
           child: Column(
@@ -1201,7 +1679,9 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
           ),
         ),
       ],
-    );
+    ),
+  ),
+);
   }
 
   // Dialog Ubah Harga Jual Dinamis
@@ -1359,7 +1839,138 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
               200000.0
             ].where((n) => n >= total).toSet().toList();
 
-            return Container(
+            Future<void> doProcessCheckout({required bool autoPrint}) async {
+              final isDebt = paymentMethod == 'Kasbon';
+              if (isDebt && customerNameCtrl.text.trim().isEmpty) {
+                ScaffoldMessenger.of(modalCtx).showSnackBar(
+                  const SnackBar(
+                    content: Text('⚠️ Nama pelanggan kasbon wajib diisi!'),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+                return;
+              }
+              Navigator.pop(pCtx);
+              final dueDate = (isDebt && dueDays > 0)
+                  ? DateTime.now().add(Duration(days: dueDays))
+                  : null;
+              final trx = await pos.checkout(
+                cashPaid: paymentMethod == 'Tunai' ? cashPaid : total,
+                paymentMethod: paymentMethod,
+                customerId: isDebt ? null : pos.selectedCustomer?.id,
+                customerName: isDebt
+                    ? customerNameCtrl.text.trim()
+                    : pos.effectiveCustomerName,
+                customerPhone: isDebt
+                    ? customerPhoneCtrl.text.trim()
+                    : pos.selectedCustomer?.phone,
+                dueDate: dueDate,
+                note: isDebt ? debtNoteCtrl.text.trim() : null,
+                autoPrint: autoPrint,
+              );
+              if (trx != null && context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(isDebt
+                        ? '✅ Kasbon atas nama ${customerNameCtrl.text.trim()} tercatat dan dicetak!'
+                        : '✅ Transaksi ${trx.invoiceNo} tersimpan${autoPrint ? " dan dicetak!" : "!"}'),
+                    backgroundColor: isDebt
+                        ? Colors.purple
+                        : paymentMethod == 'QRIS'
+                            ? Colors.blue.shade700
+                            : AppConfig.primaryTeal,
+                  ),
+                );
+              }
+            }
+
+            return Focus(
+              autofocus: true,
+              onKeyEvent: (node, event) {
+                if (event is! KeyDownEvent) return KeyEventResult.ignored;
+                final key = event.logicalKey;
+
+                // Esc: Tutup modal
+                if (key == LogicalKeyboardKey.escape) {
+                  Navigator.pop(pCtx);
+                  return KeyEventResult.handled;
+                }
+
+                // Cek apakah kursor aktif di input teks kasbon (nama, telepon, catatan)
+                final primaryFocus = FocusManager.instance.primaryFocus;
+                final isFieldFocused = primaryFocus != null &&
+                    (primaryFocus.context?.widget is EditableText ||
+                        primaryFocus.debugLabel?.contains('EditableText') == true);
+
+                // Home / F6 untuk Uang Pas otomatis (bisa digunakan kapan saja di modal bayar)
+                if (key == LogicalKeyboardKey.home || key == LogicalKeyboardKey.f6) {
+                  setPaymentState(() {
+                    paymentMethod = 'Tunai';
+                    cashCtrl.text = total.toInt().toString();
+                  });
+                  return KeyEventResult.handled;
+                }
+
+                // Enter / Numpad Enter: Selesaikan transaksi
+                if (key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.numpadEnter) {
+                  if (paymentMethod == 'Tunai' && change >= 0) {
+                    doProcessCheckout(autoPrint: true);
+                    return KeyEventResult.handled;
+                  } else if (paymentMethod == 'QRIS') {
+                    doProcessCheckout(autoPrint: true);
+                    return KeyEventResult.handled;
+                  } else if (paymentMethod == 'Kasbon' && customerNameCtrl.text.trim().isNotEmpty) {
+                    doProcessCheckout(autoPrint: true);
+                    return KeyEventResult.handled;
+                  }
+                }
+
+                // Pintasan Tombol Cepat khusus saat TIDAK sedang mengetik teks nama/catatan
+                if (!isFieldFocused) {
+                  if (key == LogicalKeyboardKey.keyT) {
+                    setPaymentState(() => paymentMethod = 'Tunai');
+                    return KeyEventResult.handled;
+                  }
+                  if (key == LogicalKeyboardKey.keyQ) {
+                    setPaymentState(() => paymentMethod = 'QRIS');
+                    return KeyEventResult.handled;
+                  }
+                  if (key == LogicalKeyboardKey.keyK) {
+                    setPaymentState(() => paymentMethod = 'Kasbon');
+                    return KeyEventResult.handled;
+                  }
+                  // Pilihan pecahan uang cepat 1..5
+                  if (paymentMethod == 'Tunai' && quickOptions.isNotEmpty) {
+                    if (key == LogicalKeyboardKey.digit1 || key == LogicalKeyboardKey.numpad1) {
+                      setPaymentState(() => cashCtrl.text = quickOptions[0].toInt().toString());
+                      return KeyEventResult.handled;
+                    }
+                    if (quickOptions.length > 1 &&
+                        (key == LogicalKeyboardKey.digit2 || key == LogicalKeyboardKey.numpad2)) {
+                      setPaymentState(() => cashCtrl.text = quickOptions[1].toInt().toString());
+                      return KeyEventResult.handled;
+                    }
+                    if (quickOptions.length > 2 &&
+                        (key == LogicalKeyboardKey.digit3 || key == LogicalKeyboardKey.numpad3)) {
+                      setPaymentState(() => cashCtrl.text = quickOptions[2].toInt().toString());
+                      return KeyEventResult.handled;
+                    }
+                    if (quickOptions.length > 3 &&
+                        (key == LogicalKeyboardKey.digit4 || key == LogicalKeyboardKey.numpad4)) {
+                      setPaymentState(() => cashCtrl.text = quickOptions[3].toInt().toString());
+                      return KeyEventResult.handled;
+                    }
+                    if (quickOptions.length > 4 &&
+                        (key == LogicalKeyboardKey.digit5 || key == LogicalKeyboardKey.numpad5)) {
+                      setPaymentState(() => cashCtrl.text = quickOptions[4].toInt().toString());
+                      return KeyEventResult.handled;
+                    }
+                  }
+                }
+
+                return KeyEventResult.ignored;
+              },
+              child: Container(
               padding: EdgeInsets.only(
                 left: 20,
                 right: 20,
@@ -1421,7 +2032,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                                         color: paymentMethod == 'Tunai' ? AppConfig.primaryTeal : const Color(0xFF64748B)),
                                     const SizedBox(width: 4),
                                     Text(
-                                      'Tunai',
+                                      'Tunai [T]',
                                       style: TextStyle(
                                         fontSize: 12,
                                         fontWeight: FontWeight.bold,
@@ -1454,7 +2065,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                                         color: paymentMethod == 'QRIS' ? Colors.blue.shade700 : const Color(0xFF64748B)),
                                     const SizedBox(width: 4),
                                     Text(
-                                      'QRIS',
+                                      'QRIS [Q]',
                                       style: TextStyle(
                                         fontSize: 12,
                                         fontWeight: FontWeight.bold,
@@ -1487,7 +2098,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                                         color: paymentMethod == 'Kasbon' ? Colors.purple : const Color(0xFF64748B)),
                                     const SizedBox(width: 4),
                                     Text(
-                                      'Kasbon',
+                                      'Kasbon [K]',
                                       style: TextStyle(
                                         fontSize: 12,
                                         fontWeight: FontWeight.bold,
@@ -1576,7 +2187,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                         children: quickOptions.map((opt) {
                           final isExact = (opt - total).abs() < 0.001;
                           return ActionChip(
-                            label: Text(isExact ? 'Uang Pas' : _currencyFormat.format(opt)),
+                            label: Text(isExact ? 'Uang Pas [Home]' : _currencyFormat.format(opt)),
                             labelStyle: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.bold,
@@ -1739,10 +2350,10 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                               icon: const Icon(Icons.print, size: 18),
                               label: Text(
                                 paymentMethod == 'Tunai'
-                                    ? 'Bayar & Cetak Struk'
+                                    ? 'Bayar & Cetak Struk (Enter)'
                                     : paymentMethod == 'QRIS'
-                                        ? 'Simpan & Cetak QRIS'
-                                        : 'Catat & Cetak Kasbon',
+                                        ? 'Simpan & Cetak QRIS (Enter)'
+                                        : 'Catat & Cetak Kasbon (Enter)',
                                 style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w900),
                               ),
                               style: ElevatedButton.styleFrom(
@@ -1756,50 +2367,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                               ),
                               onPressed: (paymentMethod == 'Tunai' && change < 0)
                                   ? null
-                                  : () async {
-                                      final isDebt = paymentMethod == 'Kasbon';
-                                      if (isDebt && customerNameCtrl.text.trim().isEmpty) {
-                                        ScaffoldMessenger.of(modalCtx).showSnackBar(
-                                          const SnackBar(
-                                            content: Text('⚠️ Nama pelanggan kasbon wajib diisi!'),
-                                            backgroundColor: Colors.red,
-                                          ),
-                                        );
-                                        return;
-                                      }
-                                      Navigator.pop(pCtx);
-                                      final dueDate = (isDebt && dueDays > 0)
-                                          ? DateTime.now().add(Duration(days: dueDays))
-                                          : null;
-                                      final trx = await pos.checkout(
-                                        cashPaid: paymentMethod == 'Tunai' ? cashPaid : total,
-                                        paymentMethod: paymentMethod,
-                                        customerId: isDebt ? null : pos.selectedCustomer?.id,
-                                        customerName: isDebt
-                                            ? customerNameCtrl.text.trim()
-                                            : pos.effectiveCustomerName,
-                                        customerPhone: isDebt
-                                            ? customerPhoneCtrl.text.trim()
-                                            : pos.selectedCustomer?.phone,
-                                        dueDate: dueDate,
-                                        note: isDebt ? debtNoteCtrl.text.trim() : null,
-                                        autoPrint: true,
-                                      );
-                                      if (trx != null && context.mounted) {
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          SnackBar(
-                                            content: Text(isDebt
-                                                ? '✅ Kasbon atas nama ${customerNameCtrl.text.trim()} tercatat dan dicetak!'
-                                                : '✅ Transaksi ${trx.invoiceNo} tersimpan dan dicetak!'),
-                                            backgroundColor: isDebt
-                                                ? Colors.purple
-                                                : paymentMethod == 'QRIS'
-                                                    ? Colors.blue.shade700
-                                                    : AppConfig.primaryTeal,
-                                          ),
-                                        );
-                                      }
-                                    },
+                                  : () => doProcessCheckout(autoPrint: true),
                             ),
                           ),
                         ),
@@ -1809,46 +2377,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                           child: OutlinedButton(
                             onPressed: (paymentMethod == 'Tunai' && change < 0)
                                 ? null
-                                : () async {
-                                    final isDebt = paymentMethod == 'Kasbon';
-                                    if (isDebt && customerNameCtrl.text.trim().isEmpty) {
-                                      ScaffoldMessenger.of(modalCtx).showSnackBar(
-                                        const SnackBar(
-                                          content: Text('⚠️ Nama pelanggan kasbon wajib diisi!'),
-                                          backgroundColor: Colors.red,
-                                        ),
-                                      );
-                                      return;
-                                    }
-                                    Navigator.pop(pCtx);
-                                    final dueDate = (isDebt && dueDays > 0)
-                                        ? DateTime.now().add(Duration(days: dueDays))
-                                        : null;
-                                    final trx = await pos.checkout(
-                                      cashPaid: paymentMethod == 'Tunai' ? cashPaid : total,
-                                      paymentMethod: paymentMethod,
-                                      customerId: isDebt ? null : pos.selectedCustomer?.id,
-                                      customerName: isDebt
-                                          ? customerNameCtrl.text.trim()
-                                          : pos.effectiveCustomerName,
-                                      customerPhone: isDebt
-                                          ? customerPhoneCtrl.text.trim()
-                                          : pos.selectedCustomer?.phone,
-                                      dueDate: dueDate,
-                                      note: isDebt ? debtNoteCtrl.text.trim() : null,
-                                      autoPrint: false,
-                                    );
-                                    if (trx != null && context.mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(
-                                          content: Text(isDebt
-                                              ? '✅ Kasbon atas nama ${customerNameCtrl.text.trim()} berhasil disimpan!'
-                                              : '✅ Transaksi ${trx.invoiceNo} disimpan!'),
-                                          backgroundColor: const Color(0xFF0F172A),
-                                        ),
-                                      );
-                                    }
-                                  },
+                                : () => doProcessCheckout(autoPrint: false),
                             style: OutlinedButton.styleFrom(
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                             ),
@@ -1860,7 +2389,8 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                   ],
                 ),
               ),
-            );
+            ),
+          );
           },
         );
       },
@@ -5419,7 +5949,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
               children: [
                 OutlinedButton.icon(
                   icon: const Icon(Icons.swap_vert_rounded, size: 14),
-                  label: const Text('Kas +/-', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                  label: const Text('Kas +/- [F7]', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                   style: OutlinedButton.styleFrom(
                     visualDensity: VisualDensity.compact,
                     foregroundColor: Colors.green.shade800,
@@ -5438,14 +5968,14 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
                   onPressed: () => _showCloseShiftDialog(context, pos),
-                  child: const Text('Tutup Shift', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                  child: const Text('Tutup Shift [F9]', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                 ),
               ],
             )
           else
             ElevatedButton.icon(
               icon: const Icon(Icons.play_arrow_rounded, size: 16),
-              label: const Text('Buka Kasir', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+              label: const Text('Buka Kasir [F9]', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
               style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.amber.shade800,
                 foregroundColor: Colors.white,
@@ -6846,7 +7376,7 @@ Mohon konfirmasi jika sudah melakukan pembayaran. Terima kasih banyak atas kerja
               ),
             OutlinedButton.icon(
               icon: const Icon(Icons.swap_horiz_rounded, size: 14),
-              label: Text(isUmum ? 'Pilih' : 'Ganti', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+              label: Text(isUmum ? 'Pilih [F3]' : 'Ganti [F3]', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
               style: OutlinedButton.styleFrom(
                 visualDensity: VisualDensity.compact,
                 foregroundColor: isUmum ? const Color(0xFF0F172A) : Colors.blue.shade800,

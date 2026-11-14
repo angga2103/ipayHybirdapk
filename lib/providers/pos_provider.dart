@@ -387,6 +387,24 @@ class PosProvider extends ChangeNotifier {
     }
   }
 
+  /// Ambil transaksi terakhir yang tersimpan untuk cetak ulang cepat (Ctrl+P)
+  Future<PosTransaction?> getLastTransaction() async {
+    if (_transactions.isNotEmpty) return _transactions.first;
+    final list = await PosDatabaseService.instance.getTransactions(limit: 1);
+    return list.isNotEmpty ? list.first : null;
+  }
+
+  /// Cetak ulang struk transaksi terakhir (Pintasan Keyboard Ctrl+P)
+  Future<bool> reprintLastTransaction() async {
+    final lastTrx = await getLastTransaction();
+    if (lastTrx == null) {
+      _errorMessage = 'Belum ada transaksi untuk dicetak ulang';
+      notifyListeners();
+      return false;
+    }
+    return await printReceipt(lastTrx);
+  }
+
   Future<bool> printConsignmentReport(ConsignmentSummary summary) async {
     try {
       return await PrinterService.instance.printConsignmentReport(

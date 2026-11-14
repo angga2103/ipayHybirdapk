@@ -598,8 +598,34 @@ class PrinterService {
   }
 
   // ==========================================
-  // 4. FUNGSI CETAK (TEST & TRANSAKSI)
+  // 4. FUNGSI CETAK (TEST & TRANSAKSI) & LACI KASIR
   // ==========================================
+
+  /// Buka Laci Kasir Elektronik (Kick Cash Drawer) via pulsa ESC/POS
+  Future<bool> openCashDrawer() async {
+    try {
+      final isConnected = await checkConnectionStatus();
+      if (!isConnected) {
+        final savedMac = await getSavedMac();
+        if (savedMac != null && savedMac.isNotEmpty) {
+          await connect(savedMac);
+        }
+      }
+      // ESC p 0 25 250 (Pin 2) & ESC p 1 25 250 (Pin 5)
+      // Ditambah DLE DC4 1 0 5 sebagai standar universal cash drawer
+      final bytes = <int>[
+        0x1B, 0x70, 0x00, 0x19, 0xFA,
+        0x1B, 0x70, 0x01, 0x19, 0xFA,
+        0x10, 0x14, 0x01, 0x00, 0x05,
+      ];
+      final res = await PrintBluetoothThermal.writeBytes(bytes);
+      debugPrint('[PrinterService] Kick cash drawer result: $res');
+      return res;
+    } catch (e) {
+      debugPrint('[PrinterService] Error openCashDrawer: $e');
+      return false;
+    }
+  }
 
   /// Cetak struk uji coba koneksi untuk memastikan printer mencetak dengan jelas (termasuk Logo)
   Future<bool> printTestReceipt({Map<String, dynamic>? storeInfo}) async {

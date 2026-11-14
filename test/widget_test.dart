@@ -16,6 +16,8 @@ import 'package:mobile_flutter/providers/printer_provider.dart';
 import 'package:mobile_flutter/services/pos_excel_service.dart';
 import 'package:mobile_flutter/services/pos_product_helper.dart';
 import 'package:mobile_flutter/services/pos_whatsapp_service.dart';
+import 'package:flutter/services.dart';
+import 'package:mobile_flutter/services/pos_keyboard_handler.dart';
 import 'package:mobile_flutter/services/printer_service.dart';
 import 'package:mobile_flutter/services/storage_service.dart';
 
@@ -1218,8 +1220,87 @@ void main() {
       expect(shift.totalSales, equals(600000.0)); // Omset total penjualan tidak terpotong
     });
 
-    test('AppConfig appVersion is updated to 2.2.8 matching pubspec.yaml', () {
-      expect(AppConfig.appVersion, equals('2.2.8'));
+    test('AppConfig appVersion is updated to 2.2.9 matching pubspec.yaml', () {
+      expect(AppConfig.appVersion, equals('2.2.9'));
+    });
+  });
+
+  group('POS Keyboard-First & Barcode Wedge Hardware Scanner Tests', () {
+    test('PosKeyboardHandler contains required shortcut categories and definitions', () {
+      expect(PosKeyboardHandler.categories.isNotEmpty, isTrue);
+      final titles = PosKeyboardHandler.categories.map((c) => c.title).toList();
+      expect(titles.contains('Navigasi Global'), isTrue);
+      expect(titles.contains('Operasional Kasir & Keranjang'), isTrue);
+      expect(titles.contains('Pembayaran & Checkout'), isTrue);
+      expect(titles.contains('Hardware & Shift Kasir'), isTrue);
+
+      final allKeys = PosKeyboardHandler.categories
+          .expand((c) => c.shortcuts)
+          .expand((s) => s.keys)
+          .toList();
+      expect(allKeys.contains('F1'), isTrue);
+      expect(allKeys.contains('F2'), isTrue);
+      expect(allKeys.contains('F5'), isTrue);
+      expect(allKeys.contains('F8'), isTrue);
+      expect(allKeys.contains('F9'), isTrue);
+      expect(allKeys.contains('Ctrl'), isTrue);
+    });
+
+    test('PosKeyboardHandler scanner wedge extracts barcode on rapid keystrokes ending with Enter', () {
+      final handler = PosKeyboardHandler();
+
+      // Simulate rapid keystrokes for barcode "8992753123456"
+      const sampleBarcode = '8992753123456';
+      String? result;
+
+      for (int i = 0; i < sampleBarcode.length; i++) {
+        final char = sampleBarcode[i];
+        final event = KeyDownEvent(
+          physicalKey: PhysicalKeyboardKey.digit0,
+          logicalKey: LogicalKeyboardKey.digit0,
+          character: char,
+          timeStamp: Duration(milliseconds: i * 15),
+        );
+        result = handler.processScannerKeystroke(event);
+        expect(result, isNull);
+      }
+
+      // Scanner sends Enter key at the end
+      final enterEvent = KeyDownEvent(
+        physicalKey: PhysicalKeyboardKey.enter,
+        logicalKey: LogicalKeyboardKey.enter,
+        timeStamp: Duration(milliseconds: sampleBarcode.length * 15 + 10),
+      );
+      result = handler.processScannerKeystroke(enterEvent);
+      expect(result, equals(sampleBarcode));
+    });
+
+    test('PosKeyboardHandler scanner wedge ignores short strings (< 3 chars)', () {
+      final handler = PosKeyboardHandler();
+
+      handler.processScannerKeystroke(const KeyDownEvent(
+        physicalKey: PhysicalKeyboardKey.keyA,
+        logicalKey: LogicalKeyboardKey.keyA,
+        character: 'A',
+        timeStamp: Duration(milliseconds: 0),
+      ));
+      handler.processScannerKeystroke(const KeyDownEvent(
+        physicalKey: PhysicalKeyboardKey.keyB,
+        logicalKey: LogicalKeyboardKey.keyB,
+        character: 'B',
+        timeStamp: Duration(milliseconds: 15),
+      ));
+
+      final res = handler.processScannerKeystroke(const KeyDownEvent(
+        physicalKey: PhysicalKeyboardKey.enter,
+        logicalKey: LogicalKeyboardKey.enter,
+        timeStamp: Duration(milliseconds: 30),
+      ));
+      expect(res, isNull);
+    });
+
+    test('PrinterService openCashDrawer method is defined and callable', () async {
+      expect(PrinterService.instance.openCashDrawer, isNotNull);
     });
   });
 }
