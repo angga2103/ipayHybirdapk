@@ -132,6 +132,11 @@ class PosProvider extends ChangeNotifier {
     _errorMessage = null;
     notifyListeners();
 
+    if (kIsWeb) {
+      loadMockPreviewData();
+      return;
+    }
+
     try {
       PrinterService.instance.syncStoreSettingsFromBackend().then((_) async {
         final profile = await PrinterService.instance.getStoreProfile();
@@ -173,6 +178,112 @@ class PosProvider extends ChangeNotifier {
     _debts = await PosDatabaseService.instance.getAllDebts();
     _debtSummary = await PosDatabaseService.instance.getDebtSummary();
     _customers = await PosDatabaseService.instance.getCustomers();
+    notifyListeners();
+  }
+
+  void loadMockPreviewData() {
+    _products = [
+      PosProduct(
+        id: 1,
+        kode: 'MN-001',
+        nama: 'Kopi Susu Gula Aren',
+        hargaJual: 11000,
+        hargaDasar: 7000,
+        stok: 25,
+        unit: 'cup',
+        kategori: 'Minuman',
+      ),
+      PosProduct(
+        id: 2,
+        kode: 'MN-002',
+        nama: 'Es Teh Manis Jumbo',
+        hargaJual: 5000,
+        hargaDasar: 2500,
+        stok: 100,
+        unit: 'cup',
+        kategori: 'Minuman',
+      ),
+      PosProduct(
+        id: 3,
+        kode: 'MK-001',
+        nama: 'Mie Goreng Telur Spesial',
+        hargaJual: 12000,
+        hargaDasar: 8000,
+        stok: 15,
+        unit: 'porsi',
+        kategori: 'Makanan',
+      ),
+      PosProduct(
+        id: 4,
+        kode: 'KS-001',
+        nama: 'Gorengan Bakwan / Tahu Isi Bu Rini',
+        hargaJual: 1500,
+        hargaDasar: 1000,
+        stok: 30,
+        unit: 'pcs',
+        kategori: 'Konsinyasi',
+        penitip: 'Bu Rini',
+        productType: 'consignment',
+      ),
+      PosProduct(
+        id: 5,
+        kode: 'KS-002',
+        nama: 'Keripik Pisang Coklat Bu Siti',
+        hargaJual: 11000,
+        hargaDasar: 8500,
+        stok: 8,
+        unit: 'bks',
+        kategori: 'Konsinyasi',
+        penitip: 'Bu Siti',
+        productType: 'consignment',
+      ),
+      PosProduct(
+        id: 6,
+        kode: 'JS-001',
+        nama: 'Jasa Pasang Tempered Glass / Anti Gores',
+        hargaJual: 5000,
+        hargaDasar: 0,
+        stok: 999,
+        isStockManaged: false,
+        unit: 'jasa',
+        kategori: 'Jasa',
+        productType: 'service',
+      ),
+      PosProduct(
+        id: 7,
+        kode: 'MK-002',
+        nama: 'Roti Bakar Keju Pak Joko',
+        hargaJual: 10000,
+        hargaDasar: 6000,
+        stok: 9,
+        unit: 'porsi',
+        kategori: 'Makanan',
+      ),
+      PosProduct(
+        id: 8,
+        kode: 'MN-003',
+        nama: 'Air Mineral Botol 600 ml',
+        hargaJual: 3500,
+        hargaDasar: 2000,
+        stok: 50,
+        unit: 'btl',
+        kategori: 'Minuman',
+      ),
+    ];
+    _categories = ['Makanan', 'Minuman', 'Konsinyasi', 'Jasa'];
+    final now = DateTime.now();
+    _activeShift = PosShift(
+      cashierName: 'admin',
+      startingCash: 100000,
+      openedAt: now.subtract(const Duration(hours: 1)),
+    );
+    _cashierName = 'admin';
+    _customers = [
+      PosCustomer(id: 1, name: 'Budi Santoso', phone: '08123456789', createdAt: now, updatedAt: now),
+      PosCustomer(id: 2, name: 'Agus Pratama', phone: '08987654321', totalDebt: 21000, createdAt: now, updatedAt: now),
+    ];
+    _isLoading = false;
+    _errorMessage = null;
     notifyListeners();
   }
 
