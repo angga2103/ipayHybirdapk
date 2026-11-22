@@ -2078,16 +2078,20 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                         style: const TextStyle(fontSize: 9, color: Color(0xFF94A3B8)),
                       ),
                       const SizedBox(width: 8),
-                      Text(
-                        product.isUnlimitedStock
-                            ? '• Bebas (∞)'
-                            : (isOutOfStock ? '• Habis' : '• Sisa: ${product.stok} ${product.unit}'),
-                        style: TextStyle(
-                          fontSize: 9.5,
-                          fontWeight: FontWeight.w600,
-                          color: isOutOfStock
-                              ? Colors.red.shade700
-                              : (product.isUnlimitedStock ? Colors.blue.shade700 : const Color(0xFF64748B)),
+                      Flexible(
+                        child: Text(
+                          product.isUnlimitedStock
+                              ? '• Bebas (∞)'
+                              : (isOutOfStock ? '• Habis' : '• Sisa: ${product.stok} ${product.unit}'),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.w600,
+                            color: isOutOfStock
+                                ? Colors.red.shade700
+                                : (product.isUnlimitedStock ? Colors.blue.shade700 : const Color(0xFF64748B)),
+                          ),
                         ),
                       ),
                     ],
