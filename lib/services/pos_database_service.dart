@@ -78,7 +78,7 @@ class PosDatabaseService {
 
     return await openDatabase(
       path,
-      version: 7,
+      version: 8,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -102,6 +102,8 @@ class PosDatabaseService {
             commission_value REAL NOT NULL DEFAULT 0,
             image_path TEXT,
             is_archived INTEGER NOT NULL DEFAULT 0,
+            has_multi_unit INTEGER NOT NULL DEFAULT 0,
+            multi_units_json TEXT,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL
           );
@@ -633,6 +635,16 @@ class PosDatabaseService {
             ''');
           } catch (_) {}
         }
+
+        if (oldVersion < 8) {
+          // Migrasi Skema v7 -> v8 (Dukungan Multi-Satuan Grosir-Eceran)
+          try {
+            await db.execute('ALTER TABLE pos_products ADD COLUMN has_multi_unit INTEGER NOT NULL DEFAULT 0;');
+          } catch (_) {}
+          try {
+            await db.execute('ALTER TABLE pos_products ADD COLUMN multi_units_json TEXT;');
+          } catch (_) {}
+        }
       },
     );
   }
@@ -951,9 +963,10 @@ class PosDatabaseService {
           );
           if (pQuery.isNotEmpty) {
             final curStock = (pQuery.first['stok'] as num).toInt();
-            if (curStock < item.qty) {
+            final requiredStock = item.totalBaseQtyDeduction;
+            if (curStock < requiredStock) {
               final prodName = pQuery.first['nama'] ?? item.product.nama;
-              throw Exception('Stok "$prodName" tidak mencukupi (Tersedia: $curStock, Diminta: ${item.qty}). Transaksi dibatalkan.');
+              throw Exception('Stok "$prodName" tidak mencukupi (Tersedia: $curStock, Dibutuhkan: $requiredStock ${item.product.unit}). Transaksi dibatalkan.');
             }
           } else {
             throw Exception('Produk "${item.product.nama}" (${item.product.kode}) tidak ditemukan di etalase.');
@@ -970,7 +983,7 @@ class PosDatabaseService {
           transactionId: trxId,
           productKode: item.product.kode,
           productName: item.product.nama,
-          unit: item.product.unit,
+          unit: item.activeUnitName,
           costPrice: item.costPrice,
           normalPrice: item.normalPrice,
           soldPrice: item.actualPrice,
@@ -986,12 +999,13 @@ class PosDatabaseService {
 
         // Potong Stok Produk HANYA jika kelola stok aktif
         if (item.isStockManaged) {
+          final deduction = item.totalBaseQtyDeduction;
           await txn.rawUpdate('''
             UPDATE pos_products 
             SET stok = CASE WHEN stok >= ? THEN stok - ? ELSE 0 END,
                 updated_at = ?
             WHERE kode = ? AND is_stock_managed = 1 AND stok >= 0
-          ''', [item.qty, item.qty, now.toIso8601String(), item.product.kode]);
+          ''', [deduction, deduction, now.toIso8601String(), item.product.kode]);
         }
       }
     });
@@ -1000,7 +1014,7 @@ class PosDatabaseService {
       transactionId: trxId,
       productKode: c.product.kode,
       productName: c.product.nama,
-      unit: c.product.unit,
+      unit: c.activeUnitName,
       costPrice: c.costPrice,
       normalPrice: c.normalPrice,
       soldPrice: c.actualPrice,

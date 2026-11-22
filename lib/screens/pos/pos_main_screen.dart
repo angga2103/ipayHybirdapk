@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 import '../../config/app_config.dart';
 import '../../models/pos_cart_item.dart';
 import '../../models/pos_product.dart';
+import '../../models/pos_product_unit.dart';
 import '../../models/pos_transaction.dart';
 import '../../providers/pos_provider.dart';
 import '../../providers/printer_provider.dart';
@@ -39,6 +40,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
   final FocusNode _searchFocusNode = FocusNode();
   final PosKeyboardHandler _keyboardHandler = PosKeyboardHandler();
   int _selectedCartIndex = 0;
+  int _highlightedProductIndex = -1;
   final TextEditingController _historyInvoiceCtrl = TextEditingController();
   final NumberFormat _currencyFormat = NumberFormat.currency(
     locale: 'id_ID',
@@ -212,19 +214,68 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
       return true;
     }
 
-    // 4. Periksa apakah pengguna sedang aktif mengetik di TextField
+    // 4. Navigasi Keyboard saat kursor aktif di Kolom Pencarian Produk (_searchFocusNode)
+    if (_searchFocusNode.hasFocus) {
+      final pos = context.read<PosProvider>();
+      final filtered = pos.filteredProducts;
+
+      if (key == LogicalKeyboardKey.arrowDown) {
+        if (filtered.isNotEmpty) {
+          setState(() {
+            _highlightedProductIndex = (_highlightedProductIndex + 1).clamp(0, filtered.length - 1);
+          });
+          return true;
+        }
+      }
+      if (key == LogicalKeyboardKey.arrowUp) {
+        if (_highlightedProductIndex > 0) {
+          setState(() {
+            _highlightedProductIndex--;
+          });
+          return true;
+        } else if (_highlightedProductIndex == 0) {
+          setState(() {
+            _highlightedProductIndex = -1;
+          });
+          return true;
+        }
+      }
+      if (key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.numpadEnter) {
+        if (_highlightedProductIndex >= 0 && _highlightedProductIndex < filtered.length) {
+          final chosen = filtered[_highlightedProductIndex];
+          final ok = pos.addToCart(chosen);
+          if (ok) {
+            ScannerFeedbackService.playScanSuccess();
+            ScaffoldMessenger.of(context).hideCurrentSnackBar();
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('✅ ${chosen.nama} (+1 di keranjang)'),
+                duration: const Duration(milliseconds: 700),
+                backgroundColor: AppConfig.primaryTeal,
+              ),
+            );
+          }
+          return true;
+        }
+      }
+      if (key == LogicalKeyboardKey.escape) {
+        _searchFocusNode.unfocus();
+        setState(() => _highlightedProductIndex = -1);
+        return true;
+      }
+    }
+
+    // Periksa apakah pengguna sedang aktif mengetik di TextField lain
     final primaryFocus = FocusManager.instance.primaryFocus;
     final isEditingText = primaryFocus != null &&
         (primaryFocus.context?.widget is EditableText ||
             primaryFocus.debugLabel?.contains('EditableText') == true);
 
     if (isEditingText) {
-      // Jika menekan Escape saat sedang mengetik, lepas fokus
       if (key == LogicalKeyboardKey.escape) {
         primaryFocus.unfocus();
         return true;
       }
-      // Jangan interupsi pengetikan normal karakter pengguna
       return false;
     }
 
@@ -261,6 +312,24 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
           _selectedCartIndex = (_selectedCartIndex - 1).clamp(0, pos.cart.length - 1);
         });
         return true;
+      }
+      if (key == LogicalKeyboardKey.keyU || key == LogicalKeyboardKey.arrowRight) {
+        if (_selectedCartIndex >= 0 && _selectedCartIndex < pos.cart.length) {
+          final item = pos.cart[_selectedCartIndex];
+          if (item.hasMultiUnit) {
+            pos.cycleCartItemUnit(_selectedCartIndex);
+            ScannerFeedbackService.playScanSuccess();
+            ScaffoldMessenger.of(context).hideCurrentSnackBar();
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('🔄 Satuan diubah ke: ${pos.cart[_selectedCartIndex].activeUnitName.toUpperCase()}'),
+                duration: const Duration(milliseconds: 700),
+                backgroundColor: Colors.amber.shade900,
+              ),
+            );
+            return true;
+          }
+        }
       }
       if (key == LogicalKeyboardKey.add ||
           key == LogicalKeyboardKey.numpadAdd ||
@@ -709,7 +778,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                           itemCount: filtered.length,
                           itemBuilder: (context, idx) {
                             final product = filtered[idx];
-                            return _buildProductCard(pos, product);
+                            return _buildProductCard(pos, product, isHighlighted: idx == _highlightedProductIndex);
                           },
                         )
                       : ListView.builder(
@@ -717,7 +786,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                           itemCount: filtered.length,
                           itemBuilder: (context, idx) {
                             final product = filtered[idx];
-                            return _buildProductListItem(pos, product);
+                            return _buildProductListItem(pos, product, isHighlighted: idx == _highlightedProductIndex);
                           },
                         )),
             ),
@@ -953,7 +1022,10 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                   child: TextField(
                     controller: _searchCtrl,
                     focusNode: _searchFocusNode,
-                    onChanged: (val) => pos.search(val),
+                    onChanged: (val) {
+                      pos.search(val);
+                      setState(() => _highlightedProductIndex = -1);
+                    },
                     onSubmitted: (val) => _handleSearchSubmit(val, pos),
                     style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
                     decoration: InputDecoration(
@@ -966,6 +1038,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                               onPressed: () {
                                 _searchCtrl.clear();
                                 pos.search('');
+                                setState(() => _highlightedProductIndex = -1);
                               },
                             )
                           : null,
@@ -1175,7 +1248,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                               itemCount: filtered.length,
                               itemBuilder: (context, idx) {
                                 final product = filtered[idx];
-                                return _buildProductCard(pos, product);
+                                return _buildProductCard(pos, product, isHighlighted: idx == _highlightedProductIndex);
                               },
                             )
                           : ListView.builder(
@@ -1183,7 +1256,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                               itemCount: filtered.length,
                               itemBuilder: (context, idx) {
                                 final product = filtered[idx];
-                                return _buildProductListItem(pos, product);
+                                return _buildProductListItem(pos, product, isHighlighted: idx == _highlightedProductIndex);
                               },
                             )),
                 ),
@@ -1473,6 +1546,32 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                           child: const Text('Diskon', style: TextStyle(fontSize: 8, color: Colors.blue, fontWeight: FontWeight.bold)),
                         ),
                       ],
+                      if (item.hasMultiUnit) ...[
+                        const SizedBox(width: 6),
+                        InkWell(
+                          onTap: () => pos.cycleCartItemUnit(idx),
+                          borderRadius: BorderRadius.circular(4),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                            decoration: BoxDecoration(
+                              color: Colors.amber.shade50,
+                              borderRadius: BorderRadius.circular(4),
+                              border: Border.all(color: Colors.amber.shade400),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  item.activeUnitName.toUpperCase(),
+                                  style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.w900, color: Colors.amber.shade900),
+                                ),
+                                const SizedBox(width: 2),
+                                Icon(Icons.swap_horiz, size: 10, color: Colors.amber.shade900),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                 ],
@@ -1562,25 +1661,29 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
   // =========================================================================
   // KARTU PRODUK (GRID) DENGAN LIVE IN-CARD STEPPER & QUICK BUY
   // =========================================================================
-  Widget _buildProductCard(PosProvider pos, PosProduct product) {
+  Widget _buildProductCard(PosProvider pos, PosProduct product, {bool isHighlighted = false}) {
     final bool isOutOfStock = product.isStockManaged && product.stok <= 0;
     final int cartQty = pos.getProductCartQty(product);
     final bool isInCart = cartQty > 0;
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isHighlighted ? const Color(0xFFF0FDFA) : Colors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isOutOfStock
-              ? Colors.red.shade200
-              : (isInCart ? AppConfig.primaryTeal : const Color(0xFFE2E8F0)),
-          width: isInCart ? 1.6 : 1.0,
+          color: isHighlighted
+              ? AppConfig.primaryTeal
+              : (isOutOfStock
+                  ? Colors.red.shade200
+                  : (isInCart ? AppConfig.primaryTeal : const Color(0xFFE2E8F0))),
+          width: isHighlighted ? 2.5 : (isInCart ? 1.6 : 1.0),
         ),
         boxShadow: [
           BoxShadow(
-            color: isInCart ? AppConfig.primaryTeal.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.02),
-            blurRadius: isInCart ? 6 : 4,
+            color: isHighlighted
+                ? AppConfig.primaryTeal.withValues(alpha: 0.25)
+                : (isInCart ? AppConfig.primaryTeal.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.02)),
+            blurRadius: isHighlighted ? 8 : (isInCart ? 6 : 4),
             offset: const Offset(0, 2),
           ),
         ],
@@ -1932,7 +2035,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
   // =========================================================================
   // TAMPILAN PRODUK MODEL LIST YANG RAPI DENGAN STEPPER
   // =========================================================================
-  Widget _buildProductListItem(PosProvider pos, PosProduct product) {
+  Widget _buildProductListItem(PosProvider pos, PosProduct product, {bool isHighlighted = false}) {
     final bool isOutOfStock = product.isStockManaged && product.stok <= 0;
     final int cartQty = pos.getProductCartQty(product);
     final bool isInCart = cartQty > 0;
@@ -1940,18 +2043,22 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: isHighlighted ? const Color(0xFFF0FDFA) : Colors.white,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: isOutOfStock
-              ? Colors.red.shade100
-              : (isInCart ? AppConfig.primaryTeal : const Color(0xFFE2E8F0)),
-          width: isInCart ? 1.5 : 1.0,
+          color: isHighlighted
+              ? AppConfig.primaryTeal
+              : (isOutOfStock
+                  ? Colors.red.shade100
+                  : (isInCart ? AppConfig.primaryTeal : const Color(0xFFE2E8F0))),
+          width: isHighlighted ? 2.5 : (isInCart ? 1.5 : 1.0),
         ),
         boxShadow: [
           BoxShadow(
-            color: isInCart ? AppConfig.primaryTeal.withValues(alpha: 0.06) : Colors.black.withValues(alpha: 0.015),
-            blurRadius: 4,
+            color: isHighlighted
+                ? AppConfig.primaryTeal.withValues(alpha: 0.25)
+                : (isInCart ? AppConfig.primaryTeal.withValues(alpha: 0.06) : Colors.black.withValues(alpha: 0.015)),
+            blurRadius: isHighlighted ? 8 : 4,
             offset: const Offset(0, 1),
           ),
         ],
@@ -2048,6 +2155,35 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                             style: TextStyle(fontSize: 8, fontWeight: FontWeight.w900, color: Colors.red),
                           ),
                         ),
+                      if (product.hasMultiUnit) ...[
+                        const SizedBox(width: 4),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: Colors.purple.shade50,
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: Colors.purple.shade300),
+                          ),
+                          child: Text(
+                            'Multi-Satuan (${product.multiUnits.length})',
+                            style: TextStyle(fontSize: 8, fontWeight: FontWeight.w800, color: Colors.purple.shade900),
+                          ),
+                        ),
+                      ],
+                      if (isHighlighted) ...[
+                        const SizedBox(width: 4),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: AppConfig.primaryTeal,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Text(
+                            '↵ Enter',
+                            style: TextStyle(fontSize: 8, fontWeight: FontWeight.w900, color: Colors.white),
+                          ),
+                        ),
+                      ],
                     ],
                   ),
                   const SizedBox(height: 2),
@@ -2524,6 +2660,40 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                   ),
                 ),
               ),
+              if (item.hasMultiUnit) ...[
+                const SizedBox(height: 4),
+                InkWell(
+                  onTap: () {
+                    pos.cycleCartItemUnit(idx);
+                    setModalState(() {});
+                  },
+                  borderRadius: BorderRadius.circular(6),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.shade50,
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: Colors.amber.shade400),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Satuan: ${item.activeUnitName.toUpperCase()}',
+                          style: TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: Colors.amber.shade900),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(Icons.swap_horiz, size: 12, color: Colors.amber.shade900),
+                        const SizedBox(width: 2),
+                        Text(
+                          '(Ganti [U])',
+                          style: TextStyle(fontSize: 8.5, color: Colors.amber.shade800),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
         ),
@@ -4569,6 +4739,8 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
     String productType = product?.productType ?? ((product?.penitip != null && product!.penitip!.trim().isNotEmpty) ? 'consignment' : 'shop');
     String commType = product?.commissionType ?? 'markup';
     String? currentImagePath = product?.imagePath;
+    final List<PosProductUnit> localMultiUnits = List.from(product?.multiUnits ?? []);
+    bool hasMultiUnitsEnabled = localMultiUnits.isNotEmpty;
 
     showDialog(
       context: context,
@@ -4780,6 +4952,177 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                       ],
                     ),
 
+                    const SizedBox(height: 12),
+
+                    // Multi-Satuan Bertingkat (Grosir / Eceran)
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: hasMultiUnitsEnabled ? const Color(0xFFF0FDF4) : const Color(0xFFF8FAFC),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(
+                          color: hasMultiUnitsEnabled ? const Color(0xFF86EFAC) : const Color(0xFFE2E8F0),
+                        ),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(
+                                    Icons.layers_outlined,
+                                    size: 18,
+                                    color: hasMultiUnitsEnabled ? const Color(0xFF15803D) : const Color(0xFF64748B),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      const Text(
+                                        'Multi-Satuan Bertingkat',
+                                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                                      ),
+                                      Text(
+                                        'Eceran & grosir (cth: Dus, Slop, Bungkus)',
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          color: hasMultiUnitsEnabled ? const Color(0xFF166534) : const Color(0xFF94A3B8),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              Switch(
+                                value: hasMultiUnitsEnabled,
+                                activeTrackColor: const Color(0xFF22C55E).withValues(alpha: 0.5),
+                                activeThumbColor: const Color(0xFF15803D),
+                                onChanged: (val) {
+                                  setDlgState(() {
+                                    hasMultiUnitsEnabled = val;
+                                    if (val && localMultiUnits.isEmpty) {
+                                      final baseName = unitCtrl.text.trim().isEmpty ? 'pcs' : unitCtrl.text.trim();
+                                      final baseModal = double.tryParse(dasarCtrl.text) ?? 0.0;
+                                      final baseJual = double.tryParse(jualCtrl.text) ?? 0.0;
+                                      localMultiUnits.add(PosProductUnit(
+                                        unitName: baseName,
+                                        conversionFactor: 1,
+                                        hargaDasar: baseModal,
+                                        hargaJual: baseJual,
+                                        isBaseUnit: true,
+                                      ));
+                                    }
+                                  });
+                                },
+                              ),
+                            ],
+                          ),
+                          if (hasMultiUnitsEnabled) ...[
+                            const Divider(height: 16),
+                            if (localMultiUnits.isEmpty)
+                              const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 4),
+                                child: Text('Belum ada satuan ditambahkan.', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                              )
+                            else
+                              ...localMultiUnits.asMap().entries.map((entry) {
+                                final idx = entry.key;
+                                final u = entry.value;
+                                final isBase = u.isBaseUnit || u.conversionFactor == 1;
+
+                                return Container(
+                                  margin: const EdgeInsets.only(bottom: 6),
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: isBase ? AppConfig.primaryTeal.withValues(alpha: 0.4) : const Color(0xFFCBD5E1),
+                                    ),
+                                  ),
+                                  child: Row(
+                                    children: [
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: isBase ? AppConfig.primaryTeal : const Color(0xFF475569),
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: Text(
+                                          isBase ? 'Dasar (x1)' : 'x${u.conversionFactor}',
+                                          style: const TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.bold),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              u.unitName,
+                                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                                            ),
+                                            Text(
+                                              'Modal: Rp ${NumberFormat('#,###', 'id_ID').format(u.hargaDasar)} • Jual: Rp ${NumberFormat('#,###', 'id_ID').format(u.hargaJual)}',
+                                              style: const TextStyle(fontSize: 10, color: Color(0xFF64748B)),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                      IconButton(
+                                        icon: const Icon(Icons.edit, size: 16, color: Color(0xFF64748B)),
+                                        visualDensity: VisualDensity.compact,
+                                        onPressed: () => _openAddEditUnitSubDialog(
+                                          context,
+                                          baseUnitName: unitCtrl.text.trim().isEmpty ? 'pcs' : unitCtrl.text.trim(),
+                                          initialUnit: u,
+                                          onSave: (savedUnit) {
+                                            setDlgState(() {
+                                              localMultiUnits[idx] = savedUnit;
+                                            });
+                                          },
+                                        ),
+                                      ),
+                                      IconButton(
+                                        icon: const Icon(Icons.delete_outline, size: 16, color: Colors.red),
+                                        visualDensity: VisualDensity.compact,
+                                        onPressed: () {
+                                          setDlgState(() {
+                                            localMultiUnits.removeAt(idx);
+                                          });
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              }),
+                            const SizedBox(height: 6),
+                            OutlinedButton.icon(
+                              style: OutlinedButton.styleFrom(
+                                visualDensity: VisualDensity.compact,
+                                foregroundColor: const Color(0xFF15803D),
+                                side: const BorderSide(color: Color(0xFF86EFAC)),
+                              ),
+                              icon: const Icon(Icons.add, size: 15),
+                              label: const Text('Tambah Tingkat Satuan (cth: Dus/Slop)', style: TextStyle(fontSize: 11)),
+                              onPressed: () => _openAddEditUnitSubDialog(
+                                context,
+                                baseUnitName: unitCtrl.text.trim().isEmpty ? 'pcs' : unitCtrl.text.trim(),
+                                onSave: (savedUnit) {
+                                  setDlgState(() {
+                                    localMultiUnits.add(savedUnit);
+                                  });
+                                },
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+
                     // Pengaturan Konsinyasi Khusus
                     if (isConsignment) ...[
                       const SizedBox(height: 12),
@@ -4843,6 +5186,25 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                       effectiveKode = PosProductHelper.generateNumericCode(existingCodes: existing);
                     }
                     final parsedStok = isStockManaged ? (int.tryParse(stokCtrl.text) ?? 0) : -1;
+                    final List<PosProductUnit> finalUnits = [];
+                    if (hasMultiUnitsEnabled) {
+                      final baseName = unitCtrl.text.trim().isEmpty ? 'pcs' : unitCtrl.text.trim();
+                      final baseModal = double.tryParse(dasarCtrl.text) ?? 0.0;
+                      final baseJual = double.tryParse(jualCtrl.text) ?? 0.0;
+
+                      final hasBase = localMultiUnits.any((u) => u.conversionFactor == 1 || u.isBaseUnit);
+                      if (!hasBase && localMultiUnits.isNotEmpty) {
+                        finalUnits.add(PosProductUnit(
+                          unitName: baseName,
+                          conversionFactor: 1,
+                          hargaDasar: baseModal,
+                          hargaJual: baseJual,
+                          isBaseUnit: true,
+                        ));
+                      }
+                      finalUnits.addAll(localMultiUnits);
+                    }
+
                     final newP = PosProduct(
                       id: product?.id,
                       kode: effectiveKode,
@@ -4859,12 +5221,146 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                       commissionType: commType,
                       commissionValue: double.tryParse(commValCtrl.text) ?? 0.0,
                       imagePath: currentImagePath,
+                      multiUnits: finalUnits,
                     );
                     await pos.saveProduct(newP);
                     if (dCtx.mounted) Navigator.pop(dCtx);
                   },
                   style: ElevatedButton.styleFrom(backgroundColor: AppConfig.primaryTeal, foregroundColor: Colors.white),
                   child: const Text('Simpan'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  // Sub-Dialog Tambah/Edit Tingkat Satuan (POS Multi-Satuan)
+  void _openAddEditUnitSubDialog(
+    BuildContext context, {
+    required String baseUnitName,
+    PosProductUnit? initialUnit,
+    required Function(PosProductUnit) onSave,
+  }) {
+    final nameCtrl = TextEditingController(text: initialUnit?.unitName ?? '');
+    final factorCtrl = TextEditingController(
+      text: initialUnit != null ? initialUnit.conversionFactor.toString() : '12',
+    );
+    final dasarCtrl = TextEditingController(
+      text: initialUnit != null && initialUnit.hargaDasar > 0 ? initialUnit.hargaDasar.toInt().toString() : '',
+    );
+    final jualCtrl = TextEditingController(
+      text: initialUnit != null && initialUnit.hargaJual > 0 ? initialUnit.hargaJual.toInt().toString() : '',
+    );
+    final barcodeCtrl = TextEditingController(text: initialUnit?.barcode ?? '');
+    final bool isBase = initialUnit?.isBaseUnit ?? (initialUnit != null && initialUnit.conversionFactor == 1);
+
+    showDialog(
+      context: context,
+      builder: (sCtx) {
+        return StatefulBuilder(
+          builder: (context, setSubState) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: Text(
+                initialUnit == null ? 'Tambah Tingkat Satuan' : 'Edit Satuan: ${initialUnit.unitName}',
+                style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14),
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    TextField(
+                      controller: nameCtrl,
+                      decoration: const InputDecoration(
+                        labelText: 'Nama Satuan *',
+                        hintText: 'cth: Dus, Slop, Bungkus, Pack, Lusin',
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: factorCtrl,
+                      keyboardType: TextInputType.number,
+                      enabled: !isBase,
+                      decoration: InputDecoration(
+                        labelText: 'Isi / Pengali (ke $baseUnitName) *',
+                        hintText: 'cth: 12 (jika 1 unit ini berisi 12 $baseUnitName)',
+                        helperText: isBase ? 'Ini adalah satuan dasar terkecil (x1)' : 'Pengali kelipatan ke satuan dasar ($baseUnitName)',
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: dasarCtrl,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(labelText: 'Harga Modal (Rp)'),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: TextField(
+                            controller: jualCtrl,
+                            keyboardType: TextInputType.number,
+                            decoration: const InputDecoration(labelText: 'Harga Jual (Rp) *'),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    TextField(
+                      controller: barcodeCtrl,
+                      decoration: InputDecoration(
+                        labelText: 'Barcode Kemasan Satuan Ini (Opsional)',
+                        hintText: 'Scan barcode unik kemasan dus/slop',
+                        suffixIcon: IconButton(
+                          icon: const Icon(Icons.qr_code_scanner_rounded, size: 20, color: AppConfig.primaryTeal),
+                          onPressed: () async {
+                            final scanned = await PosScannerModal.scanSingle(context);
+                            if (scanned != null && scanned.isNotEmpty) {
+                              barcodeCtrl.text = scanned;
+                            }
+                          },
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(sCtx), child: const Text('Batal')),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: AppConfig.primaryTeal, foregroundColor: Colors.white),
+                  onPressed: () {
+                    final name = nameCtrl.text.trim();
+                    if (name.isEmpty) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('⚠️ Nama satuan tidak boleh kosong!')),
+                      );
+                      return;
+                    }
+                    final factor = isBase ? 1 : (int.tryParse(factorCtrl.text) ?? 1);
+                    final dasar = double.tryParse(dasarCtrl.text) ?? 0.0;
+                    final jual = double.tryParse(jualCtrl.text) ?? 0.0;
+
+                    final updatedUnit = PosProductUnit(
+                      id: initialUnit?.id,
+                      productId: initialUnit?.productId,
+                      unitName: name,
+                      conversionFactor: factor < 1 ? 1 : factor,
+                      hargaDasar: dasar,
+                      hargaJual: jual,
+                      barcode: barcodeCtrl.text.trim().isNotEmpty ? barcodeCtrl.text.trim() : null,
+                      isBaseUnit: isBase || factor == 1,
+                    );
+                    onSave(updatedUnit);
+                    Navigator.pop(sCtx);
+                  },
+                  child: const Text('Simpan Satuan'),
                 ),
               ],
             );

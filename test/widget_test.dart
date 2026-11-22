@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:mobile_flutter/config/app_config.dart';
 import 'package:mobile_flutter/models/pos_cart_item.dart';
 import 'package:mobile_flutter/models/pos_product.dart';
+import 'package:mobile_flutter/models/pos_product_unit.dart';
 import 'package:mobile_flutter/models/pos_transaction.dart';
 import 'package:mobile_flutter/providers/pos_provider.dart';
 import 'package:mobile_flutter/providers/printer_provider.dart';
@@ -1221,8 +1222,8 @@ void main() {
       expect(shift.totalSales, equals(600000.0)); // Omset total penjualan tidak terpotong
     });
 
-    test('AppConfig appVersion is updated to 2.3.0 matching pubspec.yaml', () {
-      expect(AppConfig.appVersion, equals('2.3.0'));
+    test('AppConfig appVersion is updated to 2.3.1 matching pubspec.yaml', () {
+      expect(AppConfig.appVersion, equals('2.3.1'));
     });
   });
 
@@ -1365,6 +1366,154 @@ void main() {
       final itemDiscount = PosCartItem(product: p, qty: 1, customPrice: 18000);
       expect(itemDiscount.isPriceModified, isTrue);
       expect(itemDiscount.discountAmount, equals(2000.0));
+    });
+  });
+
+  group('POS Multi-Satuan (Tiered Multi-Unit) & Stock Deduction Tests', () {
+    test('PosProductUnit toMap and fromMap serialization', () {
+      final unit = PosProductUnit(
+        unitName: 'Dus',
+        conversionFactor: 24,
+        hargaDasar: 240000,
+        hargaJual: 300000,
+        barcode: '8991234567890',
+        isBaseUnit: false,
+      );
+
+      final map = unit.toMap();
+      expect(map['unit_name'], equals('Dus'));
+      expect(map['conversion_factor'], equals(24));
+      expect(map['harga_dasar'], equals(240000.0));
+      expect(map['harga_jual'], equals(300000.0));
+      expect(map['barcode'], equals('8991234567890'));
+      expect(map['is_base_unit'], equals(0));
+
+      final restored = PosProductUnit.fromMap(map);
+      expect(restored.unitName, equals('Dus'));
+      expect(restored.conversionFactor, equals(24));
+      expect(restored.hargaDasar, equals(240000.0));
+      expect(restored.hargaJual, equals(300000.0));
+      expect(restored.isBaseUnit, isFalse);
+    });
+
+    test('PosProduct multi-unit serialization with multiple tiers (Dus -> Slop -> Bungkus -> Batang)', () {
+      final product = PosProduct(
+        kode: 'ROK-001',
+        nama: 'Rokok Surya 12',
+        hargaDasar: 1500,
+        hargaJual: 2000,
+        stok: 10000,
+        unit: 'Batang',
+        multiUnits: const [
+          PosProductUnit(unitName: 'Batang', conversionFactor: 1, hargaDasar: 1500, hargaJual: 2000, isBaseUnit: true),
+          PosProductUnit(unitName: 'Bungkus', conversionFactor: 12, hargaDasar: 18000, hargaJual: 23000),
+          PosProductUnit(unitName: 'Slop', conversionFactor: 144, hargaDasar: 215000, hargaJual: 270000),
+          PosProductUnit(unitName: 'Dus', conversionFactor: 3456, hargaDasar: 5150000, hargaJual: 6400000),
+        ],
+      );
+
+      expect(product.hasMultiUnit, isTrue);
+      expect(product.multiUnits.length, equals(4));
+
+      final map = product.toMap();
+      expect(map['has_multi_unit'], equals(1));
+      expect(map['multi_units_json'], isNotNull);
+
+      final restored = PosProduct.fromMap(map);
+      expect(restored.hasMultiUnit, isTrue);
+      expect(restored.multiUnits.length, equals(4));
+      expect(restored.multiUnits[0].unitName, equals('Batang'));
+      expect(restored.multiUnits[1].conversionFactor, equals(12));
+      expect(restored.multiUnits[2].conversionFactor, equals(144));
+      expect(restored.multiUnits[3].conversionFactor, equals(3456));
+    });
+
+    test('PosCartItem unit switching and stock deduction calculations', () {
+      const unitBatang = PosProductUnit(unitName: 'Batang', conversionFactor: 1, hargaDasar: 1500, hargaJual: 2000, isBaseUnit: true);
+      const unitBungkus = PosProductUnit(unitName: 'Bungkus', conversionFactor: 12, hargaDasar: 18000, hargaJual: 23000);
+      const unitSlop = PosProductUnit(unitName: 'Slop', conversionFactor: 144, hargaDasar: 215000, hargaJual: 270000);
+      const unitDus = PosProductUnit(unitName: 'Dus', conversionFactor: 3456, hargaDasar: 5150000, hargaJual: 6400000);
+
+      final product = PosProduct(
+        kode: 'ROK-001',
+        nama: 'Rokok Surya 12',
+        hargaDasar: 1500,
+        hargaJual: 2000,
+        stok: 10000,
+        unit: 'Batang',
+        multiUnits: const [unitBatang, unitBungkus, unitSlop, unitDus],
+      );
+
+      // 1. Initial cart item with default base unit
+      final item = PosCartItem(product: product, qty: 2);
+      expect(item.activeUnitName, equals('Batang'));
+      expect(item.unitMultiplier, equals(1));
+      expect(item.actualPrice, equals(2000.0));
+      expect(item.subtotal, equals(4000.0));
+      expect(item.totalBaseQtyDeduction, equals(2));
+
+      // 2. Cycle to next unit -> Bungkus (isi 12)
+      item.cycleNextUnit();
+      expect(item.activeUnitName, equals('Bungkus'));
+      expect(item.unitMultiplier, equals(12));
+      expect(item.actualPrice, equals(23000.0));
+      expect(item.subtotal, equals(46000.0));
+      expect(item.totalBaseQtyDeduction, equals(24)); // 2 bungkus * 12 batang
+
+      // 3. Cycle to next unit -> Slop (isi 144)
+      item.cycleNextUnit();
+      expect(item.activeUnitName, equals('Slop'));
+      expect(item.unitMultiplier, equals(144));
+      expect(item.actualPrice, equals(270000.0));
+      expect(item.subtotal, equals(540000.0));
+      expect(item.totalBaseQtyDeduction, equals(288)); // 2 slop * 144 batang
+
+      // 4. Cycle to next unit -> Dus (isi 3456)
+      item.cycleNextUnit();
+      expect(item.activeUnitName, equals('Dus'));
+      expect(item.unitMultiplier, equals(3456));
+      expect(item.actualPrice, equals(6400000.0));
+      expect(item.subtotal, equals(12800000.0));
+      expect(item.totalBaseQtyDeduction, equals(6912)); // 2 dus * 3456 batang
+
+      // 5. Cycling Dus wraps back to Batang
+      item.cycleNextUnit();
+      expect(item.activeUnitName, equals('Batang'));
+      expect(item.unitMultiplier, equals(1));
+      expect(item.totalBaseQtyDeduction, equals(2));
+    });
+
+    test('PosProvider cycleCartItemUnit and setCartItemUnit properly updates cart and subtotal', () {
+      final pos = PosProvider();
+      const unitBatang = PosProductUnit(unitName: 'Batang', conversionFactor: 1, hargaDasar: 1500, hargaJual: 2000, isBaseUnit: true);
+      const unitBungkus = PosProductUnit(unitName: 'Bungkus', conversionFactor: 12, hargaDasar: 18000, hargaJual: 23000);
+
+      final product = PosProduct(
+        kode: 'ROK-001',
+        nama: 'Rokok Surya 12',
+        hargaDasar: 1500,
+        hargaJual: 2000,
+        stok: 1000,
+        unit: 'Batang',
+        multiUnits: const [unitBatang, unitBungkus],
+      );
+
+      pos.addToCart(product);
+      pos.updateProductQty(product, 2);
+      expect(pos.cart.length, equals(1));
+      expect(pos.cart[0].activeUnitName, equals('Batang'));
+      expect(pos.cartTotal, equals(6000.0)); // 3 * 2.000
+
+      // Cycle unit at index 0
+      pos.cycleCartItemUnit(0);
+      expect(pos.cart[0].activeUnitName, equals('Bungkus'));
+      expect(pos.cart[0].unitMultiplier, equals(12));
+      expect(pos.cartTotal, equals(69000.0)); // 3 * 23.000
+
+      // Explicit set back to Batang
+      pos.setCartItemUnit(0, unitBatang);
+      expect(pos.cart[0].activeUnitName, equals('Batang'));
+      expect(pos.cartTotal, equals(6000.0));
     });
   });
 }

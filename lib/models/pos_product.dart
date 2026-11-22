@@ -1,3 +1,6 @@
+import 'dart:convert';
+import 'pos_product_unit.dart';
+
 class PosProduct {
   final int? id;
   final String kode;
@@ -15,6 +18,7 @@ class PosProduct {
   final double commissionValue; // nominal komisi atau angka persentase (misal 10%)
   final String? imagePath; // path lokal file gambar terkompresi di memori HP
   final bool isArchived; // true jika dihapus secara soft-delete
+  final List<PosProductUnit>? _multiUnits;
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
@@ -35,13 +39,17 @@ class PosProduct {
     this.commissionValue = 0.0,
     this.imagePath,
     this.isArchived = false,
+    List<PosProductUnit>? multiUnits,
     this.createdAt,
     this.updatedAt,
-  }) : isStockManaged = isStockManaged ?? (stok >= 0);
+  })  : _multiUnits = multiUnits, // ignore: prefer_initializing_formals
+        isStockManaged = isStockManaged ?? (stok >= 0);
 
+  List<PosProductUnit> get multiUnits => _multiUnits ?? const [];
   bool get isConsignment => (penitip != null && penitip!.trim().isNotEmpty) || productType == 'consignment';
   bool get isService => productType == 'service';
   bool get isUnlimitedStock => !isStockManaged || stok < 0;
+  bool get hasMultiUnit => multiUnits.isNotEmpty;
   double get profitMargin => hargaJual - hargaDasar;
 
   /// Menghitung komisi toko dan hak penitip untuk 1 unit produk
@@ -97,6 +105,8 @@ class PosProduct {
       'commission_value': commissionValue,
       'image_path': (imagePath != null && imagePath!.trim().isNotEmpty) ? imagePath!.trim() : null,
       'is_archived': isArchived ? 1 : 0,
+      'has_multi_unit': hasMultiUnit ? 1 : 0,
+      'multi_units_json': multiUnits.isNotEmpty ? jsonEncode(multiUnits.map((u) => u.toMap()).toList()) : null,
       'created_at': createdAt?.toIso8601String() ?? DateTime.now().toIso8601String(),
       'updated_at': DateTime.now().toIso8601String(),
     };
@@ -124,6 +134,22 @@ class PosProduct {
       commissionValue: (map['commission_value'] is num) ? (map['commission_value'] as num).toDouble() : 0.0,
       imagePath: map['image_path']?.toString(),
       isArchived: (map['is_archived'] == 1 || map['is_archived'] == true),
+      multiUnits: () {
+        if (map['multi_units'] is List) {
+          return (map['multi_units'] as List)
+              .map((u) => u is PosProductUnit ? u : PosProductUnit.fromMap(Map<String, dynamic>.from(u as Map)))
+              .toList();
+        }
+        if (map['multi_units_json'] != null && map['multi_units_json'].toString().trim().isNotEmpty) {
+          try {
+            final decoded = jsonDecode(map['multi_units_json'].toString());
+            if (decoded is List) {
+              return decoded.map((u) => PosProductUnit.fromMap(Map<String, dynamic>.from(u as Map))).toList();
+            }
+          } catch (_) {}
+        }
+        return <PosProductUnit>[];
+      }(),
       createdAt: map['created_at'] != null ? DateTime.tryParse(map['created_at'].toString()) : null,
       updatedAt: map['updated_at'] != null ? DateTime.tryParse(map['updated_at'].toString()) : null,
     );
@@ -146,6 +172,7 @@ class PosProduct {
     double? commissionValue,
     String? imagePath,
     bool? isArchived,
+    List<PosProductUnit>? multiUnits,
   }) {
     return PosProduct(
       id: id ?? this.id,
@@ -164,6 +191,7 @@ class PosProduct {
       commissionValue: commissionValue ?? this.commissionValue,
       imagePath: imagePath ?? this.imagePath,
       isArchived: isArchived ?? this.isArchived,
+      multiUnits: multiUnits ?? this.multiUnits,
       createdAt: createdAt,
       updatedAt: DateTime.now(),
     );

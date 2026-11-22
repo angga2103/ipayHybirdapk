@@ -1,4 +1,5 @@
 import '../models/pos_customer.dart';
+import '../models/pos_product_unit.dart';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import '../models/pos_cart_item.dart';
@@ -269,8 +270,65 @@ class PosProvider extends ChangeNotifier {
         unit: 'btl',
         kategori: 'Minuman',
       ),
+      PosProduct(
+        id: 9,
+        kode: 'MG-001',
+        nama: 'Minyak Goreng Sawit 1L',
+        hargaJual: 18000,
+        hargaDasar: 15500,
+        stok: 40,
+        unit: 'pouch',
+        kategori: 'Sembako',
+      ),
+      PosProduct(
+        id: 10,
+        kode: 'MG-002',
+        nama: 'Minyak Goreng Sawit 2L',
+        hargaJual: 35000,
+        hargaDasar: 31000,
+        stok: 25,
+        unit: 'pouch',
+        kategori: 'Sembako',
+      ),
+      PosProduct(
+        id: 11,
+        kode: 'RK-001',
+        nama: 'Rokok Gudang Garam Surya 12 (Multi-Satuan)',
+        hargaJual: 2500, // Harga dasar level 1 per batang
+        hargaDasar: 2000,
+        stok: 3456, // Stok dalam satuan terkecil (batang)
+        unit: 'btl',
+        kategori: 'Rokok',
+        multiUnits: const [
+          PosProductUnit(
+            unitName: 'Batang',
+            conversionFactor: 1,
+            hargaDasar: 2000,
+            hargaJual: 2500,
+            isBaseUnit: true,
+          ),
+          PosProductUnit(
+            unitName: 'Bungkus',
+            conversionFactor: 12,
+            hargaDasar: 24000,
+            hargaJual: 28000,
+          ),
+          PosProductUnit(
+            unitName: 'Slop',
+            conversionFactor: 144, // 12 bungkus x 12 btg
+            hargaDasar: 280000,
+            hargaJual: 320000,
+          ),
+          PosProductUnit(
+            unitName: 'Dus',
+            conversionFactor: 3456, // 24 slop x 144 btg
+            hargaDasar: 6600000,
+            hargaJual: 7500000,
+          ),
+        ],
+      ),
     ];
-    _categories = ['Makanan', 'Minuman', 'Konsinyasi', 'Jasa'];
+    _categories = ['Makanan', 'Minuman', 'Sembako', 'Rokok', 'Konsinyasi', 'Jasa'];
     final now = DateTime.now();
     _activeShift = PosShift(
       cashierName: 'admin',
@@ -305,20 +363,40 @@ class PosProvider extends ChangeNotifier {
       return false;
     }
 
+    final PosProductUnit? defaultUnit = product.hasMultiUnit
+        ? product.multiUnits.firstWhere((u) => u.isBaseUnit, orElse: () => product.multiUnits.first)
+        : null;
+
     final idx = _cart.indexWhere((it) => it.product.kode == product.kode);
     if (idx >= 0) {
-      if (product.isStockManaged && (_cart[idx].qty + 1) > product.stok) {
-        _errorMessage = 'Sisa stok "${product.nama}" hanya ${product.stok} ${product.unit}.';
+      final item = _cart[idx];
+      final targetDeduction = (item.qty + 1) * item.unitMultiplier;
+      if (product.isStockManaged && targetDeduction > product.stok) {
+        _errorMessage = 'Sisa stok "${product.nama}" tidak mencukupi (${product.stok} ${product.unit}).';
         notifyListeners();
         return false;
       }
       _cart[idx].qty += 1;
     } else {
-      _cart.add(PosCartItem(product: product, qty: 1));
+      _cart.add(PosCartItem(product: product, qty: 1, selectedUnit: defaultUnit));
     }
     _errorMessage = null;
     notifyListeners();
     return true;
+  }
+
+  void cycleCartItemUnit(int index) {
+    if (index >= 0 && index < _cart.length) {
+      _cart[index].cycleNextUnit();
+      notifyListeners();
+    }
+  }
+
+  void setCartItemUnit(int index, PosProductUnit unit) {
+    if (index >= 0 && index < _cart.length) {
+      _cart[index].setUnit(unit);
+      notifyListeners();
+    }
   }
 
   int getProductCartQty(PosProduct product) {
