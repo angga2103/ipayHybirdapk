@@ -12,6 +12,7 @@ import 'package:mobile_flutter/config/app_config.dart';
 import 'package:mobile_flutter/models/pos_cart_item.dart';
 import 'package:mobile_flutter/models/pos_product.dart';
 import 'package:mobile_flutter/models/pos_transaction.dart';
+import 'package:mobile_flutter/providers/pos_provider.dart';
 import 'package:mobile_flutter/providers/printer_provider.dart';
 import 'package:mobile_flutter/services/pos_excel_service.dart';
 import 'package:mobile_flutter/services/pos_product_helper.dart';
@@ -1220,8 +1221,8 @@ void main() {
       expect(shift.totalSales, equals(600000.0)); // Omset total penjualan tidak terpotong
     });
 
-    test('AppConfig appVersion is updated to 2.2.9 matching pubspec.yaml', () {
-      expect(AppConfig.appVersion, equals('2.2.9'));
+    test('AppConfig appVersion is updated to 2.3.0 matching pubspec.yaml', () {
+      expect(AppConfig.appVersion, equals('2.3.0'));
     });
   });
 
@@ -1301,6 +1302,69 @@ void main() {
 
     test('PrinterService openCashDrawer method is defined and callable', () async {
       expect(PrinterService.instance.openCashDrawer, isNotNull);
+    });
+  });
+
+  group('POS Responsive UI & In-Card Stepper Architecture Tests', () {
+    test('PosProvider In-Card Stepper integration (getProductCartQty, updateProductQty, setProductCartQty)', () {
+      final pos = PosProvider();
+      final p1 = PosProduct(
+        kode: 'TST-001',
+        nama: 'Produk Uji Stepper',
+        hargaJual: 15000,
+        hargaDasar: 10000,
+        stok: 10,
+        unit: 'pcs',
+        kategori: 'Makanan',
+      );
+
+      // 1. Initial state: not in cart
+      expect(pos.getProductCartQty(p1), equals(0));
+
+      // 2. Add via stepper [+]
+      final ok1 = pos.updateProductQty(p1, 1);
+      expect(ok1, isTrue);
+      expect(pos.getProductCartQty(p1), equals(1));
+      expect(pos.cart.length, equals(1));
+
+      // 3. Increment again
+      final ok2 = pos.updateProductQty(p1, 1);
+      expect(ok2, isTrue);
+      expect(pos.getProductCartQty(p1), equals(2));
+
+      // 4. Set direct target qty via manual input dialog
+      final ok3 = pos.setProductCartQty(p1, 5);
+      expect(ok3, isTrue);
+      expect(pos.getProductCartQty(p1), equals(5));
+
+      // 5. Exceed stock limit (stok: 10)
+      final okStock = pos.setProductCartQty(p1, 15);
+      expect(okStock, isFalse);
+      expect(pos.errorMessage, contains('Maksimal stok'));
+
+      // 6. Decrement down to 0 removes from cart
+      pos.updateProductQty(p1, -5);
+      expect(pos.getProductCartQty(p1), equals(0));
+      expect(pos.cart.isEmpty, isTrue);
+    });
+
+    test('PosCartItem isPriceModified accurately flags custom modified prices', () {
+      final p = PosProduct(
+        kode: 'TST-002',
+        nama: 'Produk Diskon Dinamis',
+        hargaJual: 20000,
+        hargaDasar: 15000,
+        stok: 5,
+        unit: 'pcs',
+        kategori: 'Minuman',
+      );
+
+      final itemNormal = PosCartItem(product: p, qty: 1);
+      expect(itemNormal.isPriceModified, isFalse);
+
+      final itemDiscount = PosCartItem(product: p, qty: 1, customPrice: 18000);
+      expect(itemDiscount.isPriceModified, isTrue);
+      expect(itemDiscount.discountAmount, equals(2000.0));
     });
   });
 }

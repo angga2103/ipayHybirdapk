@@ -520,41 +520,45 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
         backgroundColor: Colors.white,
         elevation: 0,
         surfaceTintColor: Colors.transparent,
+        toolbarHeight: 48,
         leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Color(0xFF1E293B)),
+          icon: const Icon(Icons.arrow_back, color: Color(0xFF1E293B), size: 22),
           onPressed: () => Navigator.pop(context),
           tooltip: 'Kembali ke PPOB Web',
         ),
-        title: Column(
+        title: const Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Kasir POS Offline',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Color(0xFF0F172A)),
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: Color(0xFF0F172A)),
             ),
             Text(
-              'Database Lokal HP • Bebas Gangguan Sinyal',
-              style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+              'Database Lokal • Bebas Gangguan Sinyal',
+              style: TextStyle(fontSize: 10, color: Color(0xFF64748B)),
             ),
           ],
         ),
         actions: [
           // Tombol Panduan Lengkap Pintasan Keyboard (F1)
           IconButton(
-            icon: const Icon(Icons.keyboard_rounded, color: AppConfig.primaryTeal, size: 22),
+            icon: const Icon(Icons.keyboard_rounded, color: AppConfig.primaryTeal, size: 20),
             tooltip: 'Panduan Pintasan Keyboard (F1)',
+            visualDensity: VisualDensity.compact,
             onPressed: () => PosKeyboardHandler.showShortcutGuideDialog(context),
           ),
           // Tombol Buka Laci Kasir Cepat (F8)
           IconButton(
-            icon: const Icon(Icons.point_of_sale_rounded, color: Color(0xFF475569), size: 20),
+            icon: const Icon(Icons.point_of_sale_rounded, color: Color(0xFF475569), size: 19),
             tooltip: 'Buka Laci Kasir (F8)',
+            visualDensity: VisualDensity.compact,
             onPressed: () => _kickCashDrawerWithFeedback(),
           ),
           // Tombol Pintas Master Data Pelanggan
           IconButton(
-            icon: const Icon(Icons.people_alt_rounded, color: AppConfig.primaryTeal, size: 22),
+            icon: const Icon(Icons.people_alt_rounded, color: AppConfig.primaryTeal, size: 20),
             tooltip: 'Data Pelanggan & Kasbon (Ctrl+2)',
+            visualDensity: VisualDensity.compact,
             onPressed: () => _tabController.animateTo(1),
           ),
           // Indikator Status Printer
@@ -567,8 +571,8 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
             },
             borderRadius: BorderRadius.circular(8),
             child: Container(
-              margin: const EdgeInsets.only(right: 12),
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+              margin: const EdgeInsets.only(right: 10),
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
               decoration: BoxDecoration(
                 color: printer.isConnected ? const Color(0xFFECFDF5) : Colors.orange.shade50,
                 borderRadius: BorderRadius.circular(8),
@@ -579,14 +583,14 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                 children: [
                   Icon(
                     Icons.print,
-                    size: 14,
+                    size: 13,
                     color: printer.isConnected ? const Color(0xFF047857) : Colors.orange.shade800,
                   ),
                   const SizedBox(width: 4),
                   Text(
                     printer.isConnected ? 'Printer Siap' : 'Printer Putus',
                     style: TextStyle(
-                      fontSize: 11,
+                      fontSize: 10.5,
                       fontWeight: FontWeight.bold,
                       color: printer.isConnected ? const Color(0xFF047857) : Colors.orange.shade800,
                     ),
@@ -595,26 +599,30 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
               ),
             ),
           ),
-          const SizedBox(width: 4),
         ],
-        bottom: TabBar(
-          controller: _tabController,
-          isScrollable: true,
-          tabAlignment: TabAlignment.start,
-          labelPadding: const EdgeInsets.symmetric(horizontal: 14),
-          labelColor: AppConfig.primaryTeal,
-          unselectedLabelColor: const Color(0xFF64748B),
-          indicatorColor: AppConfig.primaryTeal,
-          indicatorWeight: 3,
-          labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800),
-          unselectedLabelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-          tabs: const [
-            Tab(icon: Icon(Icons.point_of_sale, size: 20), text: 'Kasir [Ctrl+1]'),
-            Tab(icon: Icon(Icons.people_alt_outlined, size: 20), text: 'Pelanggan [Ctrl+2]'),
-            Tab(icon: Icon(Icons.handshake_outlined, size: 20), text: 'Konsinyasi [Ctrl+3]'),
-            Tab(icon: Icon(Icons.table_view, size: 20), text: 'Produk [Ctrl+4]'),
-            Tab(icon: Icon(Icons.receipt_long, size: 20), text: 'Riwayat [Ctrl+5]'),
-          ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(38),
+          child: Container(
+            color: Colors.white,
+            alignment: Alignment.centerLeft,
+            child: TabBar(
+              controller: _tabController,
+              isScrollable: true,
+              tabAlignment: TabAlignment.start,
+              labelPadding: const EdgeInsets.symmetric(horizontal: 10),
+              labelColor: AppConfig.primaryTeal,
+              unselectedLabelColor: const Color(0xFF64748B),
+              indicatorColor: AppConfig.primaryTeal,
+              indicatorWeight: 2.5,
+              tabs: [
+                _buildCompactTab(Icons.point_of_sale, 'Kasir [Ctrl+1]'),
+                _buildCompactTab(Icons.people_alt_outlined, 'Pelanggan [Ctrl+2]'),
+                _buildCompactTab(Icons.handshake_outlined, 'Konsinyasi [Ctrl+3]'),
+                _buildCompactTab(Icons.table_view, 'Produk [Ctrl+4]'),
+                _buildCompactTab(Icons.receipt_long, 'Riwayat [Ctrl+5]'),
+              ],
+            ),
+          ),
         ),
       ),
       body: TabBarView(
@@ -630,160 +638,50 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
     );
   }
 
+  Widget _buildCompactTab(IconData icon, String label) {
+    return Tab(
+      height: 36,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15),
+          const SizedBox(width: 5),
+          Text(label, style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800)),
+        ],
+      ),
+    );
+  }
+
   // =========================================================================
-  // TAB 1: KASIR POS (CATALOG & SPEED CHECKOUT)
+  // TAB 1: KASIR POS (CATALOG & SPEED CHECKOUT) - ADAPTIVE RESPONSIVE SYSTEM
   // =========================================================================
   Widget _buildCashierTab(PosProvider pos) {
     final filtered = pos.filteredProducts;
+    final isKeyboardOpen = MediaQuery.of(context).viewInsets.bottom > 50;
 
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWideScreen = constraints.maxWidth >= 720;
+        if (isWideScreen) {
+          return _buildTabletDualColumnCashier(pos, filtered);
+        }
+        return _buildMobileCashier(pos, filtered, isKeyboardOpen);
+      },
+    );
+  }
+
+  Widget _buildMobileCashier(PosProvider pos, List<PosProduct> filtered, bool isKeyboardOpen) {
     return Stack(
       children: [
         Column(
           children: [
-            // Status Shift Kasir & Modal Awal
-            _buildShiftStatusBar(pos),
+            // Status Shift & Pelanggan Aktif Ultra-Compact (Hanya ~38dp)
+            _buildCombinedStatusStrip(pos),
 
-            // Bar Pemilih Pelanggan Aktif Kasir
-            _buildCustomerSelectorBar(pos),
+            // Baris Pencarian & Kategori Filter Ringkas
+            _buildSearchAndFilterBar(pos, isKeyboardOpen),
 
-            // 1. Search Bar & Category Filter
-            Container(
-              color: Colors.white,
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-              child: Column(
-                children: [
-                  // Search Box with View Mode Switcher
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Container(
-                          height: 44,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFFF1F5F9),
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: TextField(
-                            controller: _searchCtrl,
-                            focusNode: _searchFocusNode,
-                            onChanged: (val) => pos.search(val),
-                            onSubmitted: (val) => _handleSearchSubmit(val, pos),
-                            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-                            decoration: InputDecoration(
-                              hintText: 'Cari nama barang / barcode... (F2 atau /)',
-                              hintStyle: TextStyle(fontSize: 13, color: Colors.grey.shade500),
-                              prefixIcon: const Icon(Icons.search, size: 20, color: Color(0xFF64748B)),
-                              suffixIcon: _searchCtrl.text.isNotEmpty
-                                  ? IconButton(
-                                      icon: const Icon(Icons.clear, size: 18),
-                                      onPressed: () {
-                                        _searchCtrl.clear();
-                                        pos.search('');
-                                      },
-                                    )
-                                  : null,
-                              border: InputBorder.none,
-                              contentPadding: const EdgeInsets.symmetric(vertical: 12),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      // Tombol Scan Barcode Kamera Cepat
-                      Container(
-                        height: 44,
-                        width: 44,
-                        decoration: BoxDecoration(
-                          color: AppConfig.primaryTeal.withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: AppConfig.primaryTeal.withValues(alpha: 0.25)),
-                        ),
-                        child: IconButton(
-                          icon: const Icon(Icons.qr_code_scanner_rounded, color: AppConfig.primaryTeal, size: 22),
-                          tooltip: 'Scan Barcode Kamera Cepat',
-                          onPressed: () => PosScannerModal.show(context, pos),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      // Tombol Ganti Mode Grid / List
-                      Container(
-                        height: 44,
-                        width: 44,
-                        decoration: BoxDecoration(
-                          color: const Color(0xFFF1F5F9),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFFE2E8F0)),
-                        ),
-                        child: IconButton(
-                          icon: Icon(
-                            pos.isGridView ? Icons.view_list_rounded : Icons.grid_view_rounded,
-                            color: AppConfig.primaryTeal,
-                            size: 22,
-                          ),
-                          tooltip: pos.isGridView ? 'Ganti ke Tampilan List' : 'Ganti ke Tampilan Grid',
-                          onPressed: () => pos.toggleViewMode(),
-                        ),
-                      ),
-                    ],
-                  ),
-
-                  // Banner Antrean Pesanan Ditahan (Hold Cart)
-                  if (pos.holdCartsCount > 0) ...[
-                    const SizedBox(height: 8),
-                    InkWell(
-                      onTap: () => _showHoldCartsSheet(context, pos),
-                      borderRadius: BorderRadius.circular(10),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                        decoration: BoxDecoration(
-                          color: Colors.amber.shade50,
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: Colors.amber.shade300),
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(Icons.pause_circle_outline_rounded, size: 18, color: Colors.amber.shade900),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Text(
-                                '${pos.holdCartsCount} Transaksi Ditahan (Shift+F4)',
-                                style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w800, color: Colors.amber.shade900),
-                              ),
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                              decoration: BoxDecoration(
-                                color: Colors.amber.shade600,
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: const Text(
-                                'Buka [Shift+F4]',
-                                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w900, color: Colors.white),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-
-                  const SizedBox(height: 10),
-
-                  // Category Horizontal Chips
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(
-                      children: [
-                        _buildCategoryChip(pos, 'ALL', 'Semua Barang'),
-                        _buildCategoryChip(pos, 'Konsinyasi', '🤝 Titipan', isConsignment: true),
-                        ...pos.categories.map((c) => _buildCategoryChip(pos, c, c)),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // 2. Product List / Grid
+            // Daftar Katalog Produk (Grid / List)
             Expanded(
               child: filtered.isEmpty
                   ? Center(
@@ -801,12 +699,12 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                     )
                   : (pos.isGridView
                       ? GridView.builder(
-                          padding: const EdgeInsets.fromLTRB(14, 12, 14, 100),
+                          padding: EdgeInsets.fromLTRB(10, 8, 10, (pos.cart.isNotEmpty && !isKeyboardOpen) ? 88 : 16),
                           gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                             crossAxisCount: 2,
-                            childAspectRatio: 0.72,
-                            crossAxisSpacing: 10,
-                            mainAxisSpacing: 10,
+                            childAspectRatio: 0.68,
+                            crossAxisSpacing: 8,
+                            mainAxisSpacing: 8,
                           ),
                           itemCount: filtered.length,
                           itemBuilder: (context, idx) {
@@ -815,7 +713,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                           },
                         )
                       : ListView.builder(
-                          padding: const EdgeInsets.fromLTRB(14, 10, 14, 100),
+                          padding: EdgeInsets.fromLTRB(10, 6, 10, (pos.cart.isNotEmpty && !isKeyboardOpen) ? 88 : 16),
                           itemCount: filtered.length,
                           itemBuilder: (context, idx) {
                             final product = filtered[idx];
@@ -826,15 +724,383 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
           ],
         ),
 
-        // 3. Floating Bottom Cart Bar
-        if (pos.cart.isNotEmpty)
+        // Floating Bottom Cart Bar (Sembunyi otomatis saat keyboard aktif untuk cegah halangan)
+        if (pos.cart.isNotEmpty && !isKeyboardOpen)
           Positioned(
-            left: 14,
-            right: 14,
-            bottom: 16,
+            left: 12,
+            right: 12,
+            bottom: 12,
             child: _buildCartBottomBar(pos),
           ),
       ],
+    );
+  }
+
+  // Combined Status Strip (Shift & Customer) - 38dp single row
+  Widget _buildCombinedStatusStrip(PosProvider pos) {
+    final shift = pos.activeShift;
+    final isOpen = shift != null && shift.isOpen;
+    final customer = pos.selectedCustomer;
+    final isUmum = customer == null;
+
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      child: Row(
+        children: [
+          // 1. Chip Status Shift Kasir (Bisa diketuk untuk menu Kas +/- dan Tutup Shift)
+          Expanded(
+            flex: 5,
+            child: InkWell(
+              onTap: () {
+                if (isOpen) {
+                  _showShiftActionsSheet(context, pos);
+                } else {
+                  _showOpenShiftDialog(context, pos);
+                }
+              },
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                decoration: BoxDecoration(
+                  color: isOpen ? const Color(0xFFF0FDF4) : const Color(0xFFFFFBEB),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isOpen ? const Color(0xFFBBF7D0) : const Color(0xFFFDE68A),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      isOpen ? Icons.storefront_rounded : Icons.lock_clock_rounded,
+                      size: 14,
+                      color: isOpen ? const Color(0xFF047857) : Colors.amber.shade900,
+                    ),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: Text(
+                        isOpen ? 'Shift: ${shift.cashierName}' : 'Shift Tutup [F9]',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: isOpen ? const Color(0xFF047857) : Colors.amber.shade900,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    Icon(
+                      Icons.arrow_drop_down,
+                      size: 16,
+                      color: isOpen ? const Color(0xFF047857) : Colors.amber.shade900,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+
+          // 2. Chip Pelanggan Aktif (Bisa diketuk untuk ganti pelanggan)
+          Expanded(
+            flex: 5,
+            child: InkWell(
+              onTap: () => _showCustomerPickerModal(context, pos),
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                decoration: BoxDecoration(
+                  color: isUmum ? const Color(0xFFF8FAFC) : const Color(0xFFEFF6FF),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isUmum ? const Color(0xFFE2E8F0) : const Color(0xFFBFDBFE),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.person_outline,
+                      size: 14,
+                      color: isUmum ? const Color(0xFF64748B) : Colors.blue.shade800,
+                    ),
+                    const SizedBox(width: 5),
+                    Expanded(
+                      child: Text(
+                        isUmum ? 'Umum [F3]' : customer.name,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w800,
+                          color: isUmum ? const Color(0xFF334155) : Colors.blue.shade900,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (!isUmum)
+                      InkWell(
+                        onTap: () => pos.selectCustomer(null),
+                        child: const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 2),
+                          child: Icon(Icons.close, size: 14, color: Colors.grey),
+                        ),
+                      )
+                    else
+                      const Icon(Icons.arrow_drop_down, size: 16, color: Color(0xFF64748B)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showShiftActionsSheet(BuildContext context, PosProvider pos) {
+    final shift = pos.activeShift;
+    if (shift == null) return;
+
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(6),
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFECFDF5),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.storefront_rounded, size: 18, color: Color(0xFF047857)),
+                      ),
+                      const SizedBox(width: 8),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Shift Aktif: ${shift.cashierName}', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold)),
+                          Text('Modal Awal: ${_currencyFormat.format(shift.startingCash)}', style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                        ],
+                      ),
+                    ],
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+              const Divider(height: 16),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(8)),
+                  child: Icon(Icons.swap_vert_rounded, color: Colors.blue.shade700, size: 20),
+                ),
+                title: const Text('Arus Kas Masuk / Keluar [F7]', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                subtitle: const Text('Catat uang modal tambahan, operasional toko, dll.', style: TextStyle(fontSize: 11)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showAddCashFlowDialog(context, pos);
+                },
+              ),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(color: Colors.green.shade50, borderRadius: BorderRadius.circular(8)),
+                  child: const Icon(Icons.lock_clock_rounded, color: Color(0xFF047857), size: 20),
+                ),
+                title: const Text('Tutup Shift Kasir [F9]', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                subtitle: const Text('Hitung fisik uang laci dan cetak laporan tutup shift.', style: TextStyle(fontSize: 11)),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _showCloseShiftDialog(context, pos);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSearchAndFilterBar(PosProvider pos, bool isKeyboardOpen) {
+    return Container(
+      color: Colors.white,
+      padding: const EdgeInsets.fromLTRB(10, 4, 10, 6),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Container(
+                  height: 38,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: TextField(
+                    controller: _searchCtrl,
+                    focusNode: _searchFocusNode,
+                    onChanged: (val) => pos.search(val),
+                    onSubmitted: (val) => _handleSearchSubmit(val, pos),
+                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+                    decoration: InputDecoration(
+                      hintText: 'Cari nama barang / barcode... (F2 atau /)',
+                      hintStyle: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                      prefixIcon: const Icon(Icons.search, size: 18, color: Color(0xFF64748B)),
+                      suffixIcon: _searchCtrl.text.isNotEmpty
+                          ? IconButton(
+                              icon: const Icon(Icons.clear, size: 16),
+                              onPressed: () {
+                                _searchCtrl.clear();
+                                pos.search('');
+                              },
+                            )
+                          : null,
+                      border: InputBorder.none,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 9),
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 6),
+              // Tombol Scan Barcode Kamera Cepat
+              Container(
+                height: 38,
+                width: 38,
+                decoration: BoxDecoration(
+                  color: AppConfig.primaryTeal.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: AppConfig.primaryTeal.withValues(alpha: 0.25)),
+                ),
+                child: IconButton(
+                  icon: const Icon(Icons.qr_code_scanner_rounded, color: AppConfig.primaryTeal, size: 19),
+                  tooltip: 'Scan Barcode Kamera Cepat',
+                  padding: EdgeInsets.zero,
+                  onPressed: () => PosScannerModal.show(context, pos),
+                ),
+              ),
+              const SizedBox(width: 6),
+              // Tombol Ganti Mode Grid / List
+              Container(
+                height: 38,
+                width: 38,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF1F5F9),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: IconButton(
+                  icon: Icon(
+                    pos.isGridView ? Icons.view_list_rounded : Icons.grid_view_rounded,
+                    color: AppConfig.primaryTeal,
+                    size: 19,
+                  ),
+                  tooltip: pos.isGridView ? 'Ganti ke List' : 'Ganti ke Grid',
+                  padding: EdgeInsets.zero,
+                  onPressed: () => pos.toggleViewMode(),
+                ),
+              ),
+              // Badge Keranjang Ringkas Saat Keyboard Android Aktif
+              if (isKeyboardOpen && pos.cart.isNotEmpty) ...[
+                const SizedBox(width: 6),
+                InkWell(
+                  onTap: () {
+                    FocusScope.of(context).unfocus();
+                    _openCartDetailSheet(context, pos);
+                  },
+                  borderRadius: BorderRadius.circular(10),
+                  child: Container(
+                    height: 38,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0F172A),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.shopping_bag_outlined, color: Colors.white, size: 15),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${pos.cartTotalQty}',
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w900, fontSize: 11.5),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+
+          // Banner Antrean Pesanan Ditahan (Hold Cart)
+          if (pos.holdCartsCount > 0) ...[
+            const SizedBox(height: 5),
+            InkWell(
+              onTap: () => _showHoldCartsSheet(context, pos),
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                decoration: BoxDecoration(
+                  color: Colors.amber.shade50,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.amber.shade300),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.pause_circle_outline_rounded, size: 15, color: Colors.amber.shade900),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        '${pos.holdCartsCount} Transaksi Ditahan (Shift+F4)',
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: Colors.amber.shade900),
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.shade600,
+                        borderRadius: BorderRadius.circular(5),
+                      ),
+                      child: const Text(
+                        'Buka [Shift+F4]',
+                        style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w900, color: Colors.white),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+
+          const SizedBox(height: 5),
+
+          // Category Horizontal Chips
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _buildCategoryChip(pos, 'ALL', 'Semua Barang'),
+                _buildCategoryChip(pos, 'Konsinyasi', '🤝 Titipan', isConsignment: true),
+                ...pos.categories.map((c) => _buildCategoryChip(pos, c, c)),
+              ],
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -864,198 +1130,781 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
     );
   }
 
-  Widget _buildProductCard(PosProvider pos, PosProduct product) {
-    final bool isOutOfStock = product.isStockManaged && product.stok <= 0;
-
-    return InkWell(
-      onTap: () {
-        if (isOutOfStock) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('⚠️ Stok "${product.nama}" sudah habis!'),
-              backgroundColor: Colors.red.shade800,
-              duration: const Duration(seconds: 2),
+  // =========================================================================
+  // TABLET SPLIT-SCREEN DUAL COLUMN CASHIER (WIDTH >= 720)
+  // =========================================================================
+  Widget _buildTabletDualColumnCashier(PosProvider pos, List<PosProduct> filtered) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // KOLOM KIRI (62%): Katalog, Pencarian & Kategori
+        Expanded(
+          flex: 62,
+          child: Container(
+            decoration: const BoxDecoration(
+              border: Border(right: BorderSide(color: Color(0xFFE2E8F0), width: 1.5)),
             ),
-          );
-          return;
-        }
-        final ok = pos.addToCart(product);
-        if (!ok && pos.errorMessage != null) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text(pos.errorMessage!),
-              backgroundColor: Colors.orange.shade800,
-              duration: const Duration(seconds: 2),
-            ),
-          );
-        }
-      },
-      borderRadius: BorderRadius.circular(16),
-      child: Opacity(
-        opacity: isOutOfStock ? 0.65 : 1.0,
-        child: Container(
-          padding: const EdgeInsets.all(10),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(
-              color: isOutOfStock ? Colors.red.shade200 : const Color(0xFFE2E8F0),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(alpha: 0.02),
-                blurRadius: 4,
-                offset: const Offset(0, 2),
-              ),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              // 1. Foto Produk / Placeholder dengan Tombol Kamera Cepat
-              Stack(
-                children: [
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(10),
-                    child: Container(
-                      height: 72,
-                      width: double.infinity,
-                      color: const Color(0xFFF1F5F9),
-                      child: (product.imagePath != null && product.imagePath!.isNotEmpty && File(product.imagePath!).existsSync())
-                          ? Image.file(
-                              File(product.imagePath!),
-                              fit: BoxFit.cover,
-                              errorBuilder: (context, error, stackTrace) => _buildPlaceholderPhoto(product),
+            child: Column(
+              children: [
+                _buildCombinedStatusStrip(pos),
+                _buildSearchAndFilterBar(pos, false),
+                Expanded(
+                  child: filtered.isEmpty
+                      ? Center(
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Icon(Icons.inventory_2_outlined, size: 56, color: Colors.grey.shade400),
+                              const SizedBox(height: 10),
+                              Text(
+                                'Tidak ada produk yang cocok',
+                                style: TextStyle(fontSize: 14, color: Colors.grey.shade600, fontWeight: FontWeight.w600),
+                              ),
+                            ],
+                          ),
+                        )
+                      : (pos.isGridView
+                          ? GridView.builder(
+                              padding: const EdgeInsets.fromLTRB(14, 10, 14, 20),
+                              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                                crossAxisCount: 3,
+                                childAspectRatio: 0.70,
+                                crossAxisSpacing: 10,
+                                mainAxisSpacing: 10,
+                              ),
+                              itemCount: filtered.length,
+                              itemBuilder: (context, idx) {
+                                final product = filtered[idx];
+                                return _buildProductCard(pos, product);
+                              },
                             )
-                          : _buildPlaceholderPhoto(product),
+                          : ListView.builder(
+                              padding: const EdgeInsets.fromLTRB(14, 8, 14, 20),
+                              itemCount: filtered.length,
+                              itemBuilder: (context, idx) {
+                                final product = filtered[idx];
+                                return _buildProductListItem(pos, product);
+                              },
+                            )),
+                ),
+              ],
+            ),
+          ),
+        ),
+
+        // KOLOM KANAN (38%): Keranjang Kasir & Panel Pembayaran Langsung
+        Expanded(
+          flex: 38,
+          child: _buildTabletCartPanel(pos),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTabletCartPanel(PosProvider pos) {
+    final cartItems = pos.cart;
+    final customer = pos.selectedCustomer;
+
+    return Container(
+      color: Colors.white,
+      child: Column(
+        children: [
+          // 1. Tablet Cart Header
+          Container(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+            decoration: const BoxDecoration(
+              color: Color(0xFFF8FAFC),
+              border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.shopping_cart_outlined, color: AppConfig.primaryTeal, size: 20),
+                    const SizedBox(width: 8),
+                    const Text(
+                      'Keranjang Pesanan',
+                      style: TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: Color(0xFF0F172A)),
                     ),
+                    const SizedBox(width: 6),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: AppConfig.primaryTeal,
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Text(
+                        '${pos.cartTotalQty}',
+                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w900, color: Colors.white),
+                      ),
+                    ),
+                  ],
+                ),
+                Row(
+                  children: [
+                    if (pos.cart.isNotEmpty)
+                      OutlinedButton.icon(
+                        onPressed: () => _promptHoldCart(context, pos, null),
+                        icon: const Icon(Icons.pause_circle_outline, size: 14, color: Color(0xFFB45309)),
+                        label: const Text('Tahan [F4]', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFB45309))),
+                        style: OutlinedButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          side: BorderSide(color: Colors.amber.shade300),
+                          backgroundColor: Colors.amber.shade50,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                      ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          // 2. Customer indicator bar
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            decoration: const BoxDecoration(
+              border: Border(bottom: BorderSide(color: Color(0xFFF1F5F9))),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    const Icon(Icons.person, size: 16, color: Color(0xFF64748B)),
+                    const SizedBox(width: 6),
+                    Text(
+                      customer != null ? customer.name : 'Pelanggan: Umum (Default)',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: customer != null ? Colors.blue.shade900 : const Color(0xFF334155),
+                      ),
+                    ),
+                  ],
+                ),
+                TextButton(
+                  onPressed: () => _showCustomerPickerModal(context, pos),
+                  style: TextButton.styleFrom(
+                    visualDensity: VisualDensity.compact,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
                   ),
-                  // Tombol Tambah / Edit Foto Cepat
-                  Positioned(
-                    right: 4,
-                    bottom: 4,
-                    child: Material(
-                      color: Colors.transparent,
-                      child: InkWell(
-                        onTap: () => _showPhotoSourcePicker(context, pos, product),
-                        borderRadius: BorderRadius.circular(14),
-                        child: Container(
-                          padding: const EdgeInsets.all(4.5),
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.6),
-                            shape: BoxShape.circle,
-                          ),
-                          child: Icon(
-                            (product.imagePath != null && product.imagePath!.isNotEmpty)
-                                ? Icons.edit
-                                : Icons.add_a_photo_outlined,
-                            size: 12,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                    ),
+                  child: Text(
+                    customer != null ? 'Ganti [F3]' : 'Pilih [F3]',
+                    style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: AppConfig.primaryTeal),
                   ),
-                  if (product.isConsignment)
-                    Positioned(
-                      left: 4,
-                      top: 4,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                        decoration: BoxDecoration(
-                          color: Colors.amber.shade600,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: const Text(
-                          'Titipan',
-                          style: TextStyle(fontSize: 7.5, fontWeight: FontWeight.w900, color: Colors.white),
-                        ),
+                ),
+              ],
+            ),
+          ),
+
+          // 3. Cart Item List / Empty state
+          Expanded(
+            child: cartItems.isEmpty
+                ? Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.shopping_bag_outlined, size: 64, color: Colors.grey.shade300),
+                          const SizedBox(height: 12),
+                          const Text(
+                            'Keranjang Belanja Kosong',
+                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF64748B)),
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'Sentuh tombol [+ Beli] pada katalog barang atau scan barcode untuk menambah belanjaan.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(fontSize: 12, color: Colors.grey.shade500),
+                          ),
+                        ],
                       ),
                     ),
-                  if (isOutOfStock)
-                    Positioned(
-                      right: 4,
-                      top: 4,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
-                        decoration: BoxDecoration(
-                          color: Colors.red.shade700,
-                          borderRadius: BorderRadius.circular(4),
-                        ),
-                        child: const Text(
-                          'HABIS',
-                          style: TextStyle(fontSize: 7.5, fontWeight: FontWeight.w900, color: Colors.white),
-                        ),
-                      ),
-                    ),
+                  )
+                : ListView.separated(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    itemCount: cartItems.length,
+                    separatorBuilder: (_, _) => const Divider(height: 12, color: Color(0xFFF1F5F9)),
+                    itemBuilder: (context, idx) {
+                      final item = cartItems[idx];
+                      return _buildTabletCartRow(context, pos, idx, item);
+                    },
+                  ),
+          ),
+
+          // 4. Order Summary & Direct Checkout Button
+          if (cartItems.isNotEmpty)
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: const BoxDecoration(
+                color: Colors.white,
+                border: Border(top: BorderSide(color: Color(0xFFE2E8F0), width: 1.5)),
+                boxShadow: [
+                  BoxShadow(
+                    color: Color(0x0A000000),
+                    blurRadius: 10,
+                    offset: Offset(0, -3),
+                  ),
                 ],
               ),
-              const SizedBox(height: 4),
-
-              // 2. Kode & Nama Produk
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    product.kode,
-                    style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)),
-                  ),
-                  Text(
-                    product.nama,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w800,
-                      color: isOutOfStock ? const Color(0xFF64748B) : const Color(0xFF0F172A),
-                      height: 1.15,
-                      decoration: isOutOfStock ? TextDecoration.lineThrough : null,
+                  if (pos.cartDiscount.abs() > 0.001)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 8),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: pos.cartDiscount > 0 ? const Color(0xFFECFDF5) : Colors.red.shade50,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            pos.cartDiscount > 0 ? 'Potongan Diskon:' : 'Penyesuaian Harga:',
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              color: pos.cartDiscount > 0 ? const Color(0xFF047857) : Colors.red.shade800,
+                            ),
+                          ),
+                          Text(
+                            '${pos.cartDiscount > 0 ? '-' : '+'} ${_currencyFormat.format(pos.cartDiscount.abs())}',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w900,
+                              color: pos.cartDiscount > 0 ? const Color(0xFF047857) : Colors.red.shade800,
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
-              ),
-
-              // 3. Harga & Keterangan Stok
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
                   Row(
-                    crossAxisAlignment: CrossAxisAlignment.baseline,
-                    textBaseline: TextBaseline.alphabetic,
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        _currencyFormat.format(product.hargaJual),
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w900,
-                          color: isOutOfStock ? Colors.grey : AppConfig.primaryTeal,
-                        ),
+                      const Text(
+                        'TOTAL PEMBAYARAN',
+                        style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Color(0xFF475569)),
                       ),
                       Text(
-                        '/${product.unit}',
-                        style: const TextStyle(fontSize: 9.5, color: Color(0xFF94A3B8)),
+                        _currencyFormat.format(pos.cartTotal),
+                        style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900, color: AppConfig.primaryTeal),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 1),
-                  Text(
-                    product.isUnlimitedStock
-                        ? 'Stok: Bebas (∞)'
-                        : (isOutOfStock ? 'Stok: Habis' : 'Stok: ${product.stok} ${product.unit}'),
-                    style: TextStyle(
-                      fontSize: 9,
-                      fontWeight: FontWeight.w600,
-                      color: isOutOfStock
-                          ? Colors.red.shade700
-                          : (product.isUnlimitedStock ? Colors.blue.shade700 : const Color(0xFF64748B)),
+                  const SizedBox(height: 12),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 48,
+                    child: ElevatedButton(
+                      onPressed: () {
+                        if (!pos.hasActiveShift) {
+                          _showShiftRequiredDialog(context, pos, actionTitle: 'Transaksi Penjualan');
+                          return;
+                        }
+                        _openPaymentModal(context, pos);
+                      },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppConfig.primaryTeal,
+                        foregroundColor: Colors.white,
+                        elevation: 1,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.payment_rounded, size: 20),
+                          SizedBox(width: 8),
+                          Text(
+                            'Bayar Sekarang [F5]',
+                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ],
               ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTabletCartRow(BuildContext context, PosProvider pos, int idx, PosCartItem item) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      child: Row(
+        children: [
+          // Nama & Ubah Harga Jual Dinamis
+          Expanded(
+            child: InkWell(
+              onTap: () => _showDynamicPriceDialog(context, pos, idx, item),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.product.nama,
+                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: Color(0xFF0F172A)),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      Text(
+                        _currencyFormat.format(item.actualPrice),
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          color: item.isPriceModified ? Colors.blue.shade700 : const Color(0xFF64748B),
+                        ),
+                      ),
+                      if (item.isPriceModified) ...[
+                        const SizedBox(width: 4),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(4)),
+                          child: const Text('Diskon', style: TextStyle(fontSize: 8, color: Colors.blue, fontWeight: FontWeight.bold)),
+                        ),
+                      ],
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
+
+          // Stepper [-] [qty] [+]
+          Container(
+            height: 30,
+            decoration: BoxDecoration(
+              color: const Color(0xFFF1F5F9),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFFE2E8F0)),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                InkWell(
+                  onTap: () => pos.updateCartQty(idx, -1),
+                  child: Container(
+                    width: 28,
+                    height: 30,
+                    alignment: Alignment.center,
+                    child: const Icon(Icons.remove, size: 14, color: Color(0xFF475569)),
+                  ),
+                ),
+                InkWell(
+                  onTap: () => _showQuickQtyDialog(context, pos, item.product),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Text(
+                      '${item.qty}',
+                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: Color(0xFF0F172A)),
+                    ),
+                  ),
+                ),
+                InkWell(
+                  onTap: () {
+                    final ok = pos.updateCartQty(idx, 1);
+                    if (!ok && pos.errorMessage != null) {
+                      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(pos.errorMessage!),
+                          backgroundColor: Colors.orange.shade800,
+                          duration: const Duration(seconds: 1),
+                        ),
+                      );
+                    }
+                  },
+                  child: Container(
+                    width: 28,
+                    height: 30,
+                    alignment: Alignment.center,
+                    child: const Icon(Icons.add, size: 14, color: Color(0xFF475569)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(width: 10),
+
+          // Total baris & Tombol Hapus
+          SizedBox(
+            width: 76,
+            child: Text(
+              _currencyFormat.format(item.subtotal),
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: AppConfig.primaryTeal),
+              textAlign: TextAlign.right,
+            ),
+          ),
+          const SizedBox(width: 4),
+          IconButton(
+            icon: const Icon(Icons.close, size: 16, color: Colors.grey),
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+            onPressed: () => pos.removeCartItem(idx),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // =========================================================================
+  // KARTU PRODUK (GRID) DENGAN LIVE IN-CARD STEPPER & QUICK BUY
+  // =========================================================================
+  Widget _buildProductCard(PosProvider pos, PosProduct product) {
+    final bool isOutOfStock = product.isStockManaged && product.stok <= 0;
+    final int cartQty = pos.getProductCartQty(product);
+    final bool isInCart = cartQty > 0;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isOutOfStock
+              ? Colors.red.shade200
+              : (isInCart ? AppConfig.primaryTeal : const Color(0xFFE2E8F0)),
+          width: isInCart ? 1.6 : 1.0,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: isInCart ? AppConfig.primaryTeal.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.02),
+            blurRadius: isInCart ? 6 : 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          // 1. Foto / Thumbnail dengan Tombol Kamera Cepat & Badge
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 8, 8, 0),
+            child: Stack(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Container(
+                    height: 70,
+                    width: double.infinity,
+                    color: const Color(0xFFF1F5F9),
+                    child: (product.imagePath != null && product.imagePath!.isNotEmpty && File(product.imagePath!).existsSync())
+                        ? Image.file(
+                            File(product.imagePath!),
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) => _buildPlaceholderPhoto(product),
+                          )
+                        : _buildPlaceholderPhoto(product),
+                  ),
+                ),
+                // Tombol Tambah / Edit Foto Cepat
+                Positioned(
+                  right: 4,
+                  bottom: 4,
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () => _showPhotoSourcePicker(context, pos, product),
+                      borderRadius: BorderRadius.circular(14),
+                      child: Container(
+                        padding: const EdgeInsets.all(4),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.6),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          (product.imagePath != null && product.imagePath!.isNotEmpty)
+                              ? Icons.edit
+                              : Icons.add_a_photo_outlined,
+                          size: 11,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                if (product.isConsignment)
+                  Positioned(
+                    left: 4,
+                    top: 4,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.shade600,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Text(
+                        'Titipan',
+                        style: TextStyle(fontSize: 7.5, fontWeight: FontWeight.w900, color: Colors.white),
+                      ),
+                    ),
+                  ),
+                if (isOutOfStock)
+                  Positioned(
+                    right: 4,
+                    top: 4,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: Colors.red.shade700,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Text(
+                        'HABIS',
+                        style: TextStyle(fontSize: 7.5, fontWeight: FontWeight.w900, color: Colors.white),
+                      ),
+                    ),
+                  )
+                else if (isInCart)
+                  Positioned(
+                    right: 4,
+                    top: 4,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                      decoration: BoxDecoration(
+                        color: AppConfig.primaryTeal,
+                        borderRadius: BorderRadius.circular(4),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.15),
+                            blurRadius: 3,
+                          ),
+                        ],
+                      ),
+                      child: Text(
+                        '$cartQty di keranjang',
+                        style: const TextStyle(fontSize: 7.5, fontWeight: FontWeight.w900, color: Colors.white),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+
+          // 2. Info Nama, Harga & Stok
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  product.nama,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    fontWeight: FontWeight.w800,
+                    color: isOutOfStock ? const Color(0xFF64748B) : const Color(0xFF0F172A),
+                    height: 1.15,
+                    decoration: isOutOfStock ? TextDecoration.lineThrough : null,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
+                  children: [
+                    Text(
+                      _currencyFormat.format(product.hargaJual),
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w900,
+                        color: isOutOfStock ? Colors.grey : AppConfig.primaryTeal,
+                      ),
+                    ),
+                    Text(
+                      '/${product.unit}',
+                      style: const TextStyle(fontSize: 9, color: Color(0xFF94A3B8)),
+                    ),
+                  ],
+                ),
+                Text(
+                  product.isUnlimitedStock
+                      ? 'Stok: Bebas (∞)'
+                      : (isOutOfStock ? 'Stok: Habis' : 'Sisa: ${product.stok} ${product.unit}'),
+                  style: TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.w600,
+                    color: isOutOfStock
+                        ? Colors.red.shade700
+                        : (product.isUnlimitedStock ? Colors.blue.shade700 : const Color(0xFF64748B)),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // 3. Tombol Beli / Stepper Interaktif In-Card
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+            child: _buildInCardStepper(pos, product, cartQty, isOutOfStock),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // =========================================================================
+  // INTERACTIVE IN-CARD STEPPER ([-] [QTY] [+])
+  // =========================================================================
+  Widget _buildInCardStepper(PosProvider pos, PosProduct product, int cartQty, bool isOutOfStock) {
+    if (isOutOfStock) {
+      return Container(
+        height: 30,
+        alignment: Alignment.center,
+        decoration: BoxDecoration(
+          color: Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: Colors.grey.shade300),
+        ),
+        child: Text(
+          'Stok Habis',
+          style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Colors.grey.shade500),
+        ),
+      );
+    }
+
+    if (cartQty <= 0) {
+      return SizedBox(
+        width: double.infinity,
+        height: 30,
+        child: ElevatedButton(
+          onPressed: () {
+            final ok = pos.addToCart(product);
+            if (ok) {
+              ScannerFeedbackService.playScanSuccess();
+              HapticFeedback.lightImpact();
+            } else {
+              ScannerFeedbackService.playScanError();
+              if (pos.errorMessage != null) {
+                ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(pos.errorMessage!),
+                    backgroundColor: Colors.orange.shade800,
+                    duration: const Duration(seconds: 1),
+                  ),
+                );
+              }
+            }
+          },
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppConfig.primaryTeal,
+            foregroundColor: Colors.white,
+            padding: EdgeInsets.zero,
+            elevation: 0,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+          child: const Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.add_shopping_cart, size: 13),
+              SizedBox(width: 4),
+              Text('+ Beli', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
             ],
           ),
         ),
+      );
+    }
+
+    // Tampilan Stepper Saat Produk Sudah di Keranjang: [-] [qty] [+]
+    return Container(
+      height: 30,
+      decoration: BoxDecoration(
+        color: AppConfig.primaryTeal.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: AppConfig.primaryTeal.withValues(alpha: 0.4)),
+      ),
+      child: Row(
+        children: [
+          // Tombol Kurang [-]
+          InkWell(
+            onTap: () {
+              pos.updateProductQty(product, -1);
+              HapticFeedback.lightImpact();
+            },
+            borderRadius: const BorderRadius.horizontal(left: Radius.circular(7)),
+            child: Container(
+              width: 30,
+              height: 30,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: Colors.red.shade50,
+                borderRadius: const BorderRadius.horizontal(left: Radius.circular(7)),
+              ),
+              child: Icon(
+                cartQty == 1 ? Icons.delete_outline : Icons.remove,
+                size: 15,
+                color: Colors.red.shade700,
+              ),
+            ),
+          ),
+
+          // Angka Jumlah (Ketuk untuk input angka langsung)
+          Expanded(
+            child: InkWell(
+              onTap: () => _showQuickQtyDialog(context, pos, product),
+              child: Center(
+                child: Text(
+                  '$cartQty',
+                  style: const TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w900,
+                    color: AppConfig.primaryTeal,
+                  ),
+                ),
+              ),
+            ),
+          ),
+
+          // Tombol Tambah [+]
+          InkWell(
+            onTap: () {
+              final ok = pos.updateProductQty(product, 1);
+              if (ok) {
+                ScannerFeedbackService.playScanSuccess();
+                HapticFeedback.lightImpact();
+              } else {
+                ScannerFeedbackService.playScanError();
+                ScaffoldMessenger.of(context).hideCurrentSnackBar();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(pos.errorMessage ?? 'Maksimal stok tercapai!'),
+                    backgroundColor: Colors.orange.shade800,
+                    duration: const Duration(seconds: 1),
+                  ),
+                );
+              }
+            },
+            borderRadius: const BorderRadius.horizontal(right: Radius.circular(7)),
+            child: Container(
+              width: 30,
+              height: 30,
+              alignment: Alignment.center,
+              decoration: const BoxDecoration(
+                color: AppConfig.primaryTeal,
+                borderRadius: BorderRadius.horizontal(right: Radius.circular(7)),
+              ),
+              child: const Icon(
+                Icons.add,
+                size: 15,
+                color: Colors.white,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -1080,9 +1929,13 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
     );
   }
 
-  /// Tampilan Produk Model List yang Rapi Sesuai Web iPay
+  // =========================================================================
+  // TAMPILAN PRODUK MODEL LIST YANG RAPI DENGAN STEPPER
+  // =========================================================================
   Widget _buildProductListItem(PosProvider pos, PosProduct product) {
     final bool isOutOfStock = product.isStockManaged && product.stok <= 0;
+    final int cartQty = pos.getProductCartQty(product);
+    final bool isInCart = cartQty > 0;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -1090,155 +1943,147 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: isOutOfStock ? Colors.red.shade100 : const Color(0xFFE2E8F0),
+          color: isOutOfStock
+              ? Colors.red.shade100
+              : (isInCart ? AppConfig.primaryTeal : const Color(0xFFE2E8F0)),
+          width: isInCart ? 1.5 : 1.0,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.015),
+            color: isInCart ? AppConfig.primaryTeal.withValues(alpha: 0.06) : Colors.black.withValues(alpha: 0.015),
             blurRadius: 4,
             offset: const Offset(0, 1),
           ),
         ],
       ),
-      child: Material(
-        color: Colors.transparent,
-        child: InkWell(
-          borderRadius: BorderRadius.circular(14),
-          onTap: () {
-            if (isOutOfStock) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('⚠️ Stok "${product.nama}" sudah habis!'),
-                  backgroundColor: Colors.red.shade800,
-                  duration: const Duration(seconds: 2),
-                ),
-              );
-              return;
-            }
-            final ok = pos.addToCart(product);
-            if (!ok && pos.errorMessage != null) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text(pos.errorMessage!),
-                  backgroundColor: Colors.orange.shade800,
-                  duration: const Duration(seconds: 2),
-                ),
-              );
-            }
-          },
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            child: Row(
-              children: [
-                // Thumbnail / Inisial / Icon Box
-                GestureDetector(
-                  onTap: () => _showPhotoSourcePicker(context, pos, product),
-                  child: Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: isOutOfStock
-                          ? Colors.grey.shade100
-                          : (product.isConsignment ? Colors.amber.shade50 : AppConfig.primaryTeal.withValues(alpha: 0.1)),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: isOutOfStock
-                            ? Colors.grey.shade300
-                            : (product.isConsignment ? Colors.amber.shade300 : AppConfig.primaryTeal.withValues(alpha: 0.2)),
-                      ),
-                    ),
-                    child: (product.imagePath != null && product.imagePath!.isNotEmpty && File(product.imagePath!).existsSync())
-                        ? ClipRRect(
-                            borderRadius: BorderRadius.circular(9),
-                            child: Image.file(File(product.imagePath!), fit: BoxFit.cover, width: 44, height: 44),
-                          )
-                        : Stack(
-                            alignment: Alignment.center,
-                            children: [
-                              Text(
-                                product.nama.isNotEmpty ? product.nama[0].toUpperCase() : 'P',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w900,
-                                  color: isOutOfStock
-                                      ? Colors.grey
-                                      : (product.isConsignment ? Colors.amber.shade900 : AppConfig.primaryTeal),
-                                ),
-                              ),
-                              Positioned(
-                                right: 1,
-                                bottom: 1,
-                                child: Container(
-                                  padding: const EdgeInsets.all(1.5),
-                                  decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.5), shape: BoxShape.circle),
-                                  child: const Icon(Icons.add_a_photo, size: 9, color: Colors.white),
-                                ),
-                              ),
-                            ],
-                          ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          children: [
+            // Thumbnail / Icon
+            GestureDetector(
+              onTap: () => _showPhotoSourcePicker(context, pos, product),
+              child: Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: isOutOfStock
+                      ? Colors.grey.shade100
+                      : (product.isConsignment ? Colors.amber.shade50 : AppConfig.primaryTeal.withValues(alpha: 0.1)),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: isOutOfStock
+                        ? Colors.grey.shade300
+                        : (product.isConsignment ? Colors.amber.shade300 : AppConfig.primaryTeal.withValues(alpha: 0.2)),
                   ),
                 ),
-                const SizedBox(width: 12),
-
-                // Informasi Produk
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
+                child: (product.imagePath != null && product.imagePath!.isNotEmpty && File(product.imagePath!).existsSync())
+                    ? ClipRRect(
+                        borderRadius: BorderRadius.circular(9),
+                        child: Image.file(File(product.imagePath!), fit: BoxFit.cover, width: 44, height: 44),
+                      )
+                    : Stack(
+                        alignment: Alignment.center,
                         children: [
                           Text(
-                            product.kode,
-                            style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)),
+                            product.nama.isNotEmpty ? product.nama[0].toUpperCase() : 'P',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w900,
+                              color: isOutOfStock
+                                  ? Colors.grey
+                                  : (product.isConsignment ? Colors.amber.shade900 : AppConfig.primaryTeal),
+                            ),
                           ),
-                          const SizedBox(width: 6),
-                          if (product.isConsignment)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                              decoration: BoxDecoration(
-                                color: Colors.amber.shade50,
-                                borderRadius: BorderRadius.circular(4),
-                                border: Border.all(color: Colors.amber.shade300),
-                              ),
-                              child: Text(
-                                'Titipan ${product.penitip ?? ""}'.trim(),
-                                style: TextStyle(fontSize: 8, fontWeight: FontWeight.w800, color: Colors.amber.shade900),
-                              ),
+                          Positioned(
+                            right: 1,
+                            bottom: 1,
+                            child: Container(
+                              padding: const EdgeInsets.all(1.5),
+                              decoration: BoxDecoration(color: Colors.black.withValues(alpha: 0.5), shape: BoxShape.circle),
+                              child: const Icon(Icons.add_a_photo, size: 9, color: Colors.white),
                             ),
-                          if (isOutOfStock)
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                              decoration: BoxDecoration(
-                                color: Colors.red.shade50,
-                                borderRadius: BorderRadius.circular(4),
-                                border: Border.all(color: Colors.red.shade300),
-                              ),
-                              child: Text(
-                                'HABIS',
-                                style: TextStyle(fontSize: 8, fontWeight: FontWeight.w900, color: Colors.red.shade800),
-                              ),
-                            ),
+                          ),
                         ],
                       ),
-                      const SizedBox(height: 2),
+              ),
+            ),
+            const SizedBox(width: 10),
+
+            // Informasi Nama, Kode, Kategori & Stok
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
                       Text(
-                        product.nama,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                        product.kode,
+                        style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.bold, color: Color(0xFF94A3B8)),
+                      ),
+                      const SizedBox(width: 6),
+                      if (product.isConsignment)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: Colors.amber.shade50,
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: Colors.amber.shade300),
+                          ),
+                          child: Text(
+                            'Titipan ${product.penitip ?? ""}'.trim(),
+                            style: TextStyle(fontSize: 8, fontWeight: FontWeight.w800, color: Colors.amber.shade900),
+                          ),
+                        ),
+                      if (isOutOfStock)
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: Colors.red.shade50,
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: Colors.red.shade300),
+                          ),
+                          child: const Text(
+                            'HABIS',
+                            style: TextStyle(fontSize: 8, fontWeight: FontWeight.w900, color: Colors.red),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    product.nama,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w800,
+                      color: isOutOfStock ? const Color(0xFF64748B) : const Color(0xFF0F172A),
+                      decoration: isOutOfStock ? TextDecoration.lineThrough : null,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      Text(
+                        _currencyFormat.format(product.hargaJual),
                         style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w800,
-                          color: isOutOfStock ? const Color(0xFF64748B) : const Color(0xFF0F172A),
-                          decoration: isOutOfStock ? TextDecoration.lineThrough : null,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w900,
+                          color: isOutOfStock ? Colors.grey : AppConfig.primaryTeal,
                         ),
                       ),
-                      const SizedBox(height: 2),
+                      Text(
+                        '/${product.unit}',
+                        style: const TextStyle(fontSize: 9, color: Color(0xFF94A3B8)),
+                      ),
+                      const SizedBox(width: 8),
                       Text(
                         product.isUnlimitedStock
-                            ? 'Stok: Bebas (∞)'
-                            : (isOutOfStock ? 'Stok: Habis' : 'Sisa: ${product.stok} ${product.unit}'),
+                            ? '• Bebas (∞)'
+                            : (isOutOfStock ? '• Habis' : '• Sisa: ${product.stok} ${product.unit}'),
                         style: TextStyle(
-                          fontSize: 10,
+                          fontSize: 9.5,
                           fontWeight: FontWeight.w600,
                           color: isOutOfStock
                               ? Colors.red.shade700
@@ -1247,69 +2092,137 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                       ),
                     ],
                   ),
-                ),
-
-                const SizedBox(width: 8),
-
-                // Harga & Tombol Beli Cepat
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text(
-                      _currencyFormat.format(product.hargaJual),
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w900,
-                        color: isOutOfStock ? Colors.grey : AppConfig.primaryTeal,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: isOutOfStock ? Colors.grey.shade200 : AppConfig.primaryTeal,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(
-                            isOutOfStock ? Icons.block : Icons.add_shopping_cart,
-                            size: 13,
-                            color: isOutOfStock ? Colors.grey.shade600 : Colors.white,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            isOutOfStock ? 'Habis' : 'Beli',
-                            style: TextStyle(
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.bold,
-                              color: isOutOfStock ? Colors.grey.shade600 : Colors.white,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
+
+            const SizedBox(width: 8),
+
+            // Stepper In-List / Tombol Beli Cepat
+            SizedBox(
+              width: 104,
+              child: _buildInCardStepper(pos, product, cartQty, isOutOfStock),
+            ),
+          ],
         ),
       ),
     );
   }
 
+  // =========================================================================
+  // DIALOG CEPAT UBAH KUANTITAS SECARA MANUAL / DIKETIK
+  // =========================================================================
+  void _showQuickQtyDialog(BuildContext context, PosProvider pos, PosProduct product) {
+    final currentQty = pos.getProductCartQty(product);
+    final ctrl = TextEditingController(text: currentQty > 0 ? currentQty.toString() : '1');
+    showDialog(
+      context: context,
+      builder: (dCtx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            const Icon(Icons.edit_note_rounded, color: AppConfig.primaryTeal),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'Jumlah: ${product.nama}',
+                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              product.isUnlimitedStock ? 'Stok: Bebas (∞)' : 'Stok Tersedia: ${product.stok} ${product.unit}',
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: ctrl,
+              autofocus: true,
+              keyboardType: TextInputType.number,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+              decoration: InputDecoration(
+                labelText: 'Jumlah (${product.unit})',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.clear),
+                  onPressed: () => ctrl.clear(),
+                ),
+              ),
+              onSubmitted: (val) {
+                final target = int.tryParse(val) ?? 0;
+                Navigator.pop(dCtx);
+                _applyTargetQty(pos, product, target);
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dCtx);
+              pos.setProductCartQty(product, 0);
+            },
+            child: const Text('Hapus Item', style: TextStyle(color: Colors.red)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx),
+            child: const Text('Batal'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppConfig.primaryTeal,
+              foregroundColor: Colors.white,
+            ),
+            onPressed: () {
+              final target = int.tryParse(ctrl.text) ?? 0;
+              Navigator.pop(dCtx);
+              _applyTargetQty(pos, product, target);
+            },
+            child: const Text('Simpan'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _applyTargetQty(PosProvider pos, PosProduct product, int target) {
+    if (target <= 0) {
+      pos.setProductCartQty(product, 0);
+      return;
+    }
+    final ok = pos.setProductCartQty(product, target);
+    if (!ok && pos.errorMessage != null) {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(pos.errorMessage!),
+          backgroundColor: Colors.orange.shade800,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  // =========================================================================
+  // FLOATING BOTTOM CART BAR UNTUK HP (AUTO-HIDE SAAT KEYBOARD AKTIF)
+  // =========================================================================
   Widget _buildCartBottomBar(PosProvider pos) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
         color: const Color(0xFF0F172A),
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(18),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.25),
-            blurRadius: 16,
+            color: Colors.black.withValues(alpha: 0.28),
+            blurRadius: 14,
             offset: const Offset(0, 4),
           ),
         ],
@@ -1317,14 +2230,14 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
       child: Row(
         children: [
           Container(
-            padding: const EdgeInsets.all(8),
+            padding: const EdgeInsets.all(7),
             decoration: BoxDecoration(
               color: AppConfig.primaryTeal,
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(10),
             ),
-            child: const Icon(Icons.shopping_bag_outlined, color: Colors.white, size: 20),
+            child: const Icon(Icons.shopping_bag_outlined, color: Colors.white, size: 18),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1336,7 +2249,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                 ),
                 Text(
                   _currencyFormat.format(pos.cartTotal),
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w900, color: Colors.white),
+                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900, color: Colors.white),
                 ),
               ],
             ),
@@ -1346,15 +2259,16 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
             style: ElevatedButton.styleFrom(
               backgroundColor: AppConfig.primaryTeal,
               foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              elevation: 0,
             ),
             child: const Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text('Periksa & Bayar', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w900)),
+                Text('Periksa & Bayar', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w900)),
                 SizedBox(width: 4),
-                Icon(Icons.arrow_forward_ios, size: 12),
+                Icon(Icons.arrow_forward_ios, size: 11),
               ],
             ),
           ),
@@ -5586,7 +6500,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
     );
   }
 
-  void _promptHoldCart(BuildContext context, PosProvider pos, BuildContext sheetCtx) {
+  void _promptHoldCart(BuildContext context, PosProvider pos, [BuildContext? sheetCtx]) {
     final noteCtrl = TextEditingController(text: 'Antrean #${pos.holdCartsCount + 1}');
     showDialog(
       context: context,
@@ -5620,7 +6534,9 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
             style: ElevatedButton.styleFrom(backgroundColor: Colors.amber.shade700, foregroundColor: Colors.white),
             onPressed: () async {
               Navigator.pop(d);
-              Navigator.pop(sheetCtx);
+              if (sheetCtx != null) {
+                Navigator.pop(sheetCtx);
+              }
               final ok = await pos.holdCurrentCart(note: noteCtrl.text.trim());
               if (context.mounted) {
                 ScaffoldMessenger.of(context).showSnackBar(
@@ -5892,104 +6808,6 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
   // ==========================================
   // FITUR 1: SHIFT KASIR & KAS OPERASIONAL UI
   // ==========================================
-
-  Widget _buildShiftStatusBar(PosProvider pos) {
-    final shift = pos.activeShift;
-    final isOpen = shift != null && shift.isOpen;
-
-    return InkWell(
-      onTap: isOpen ? null : () => _showOpenShiftDialog(context, pos),
-      child: Container(
-        color: isOpen ? const Color(0xFFF0FDF4) : const Color(0xFFFFFBEB),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: isOpen ? Colors.green.shade100 : Colors.amber.shade100,
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  isOpen ? Icons.storefront_rounded : Icons.lock_clock_rounded,
-                  size: 16,
-                  color: isOpen ? Colors.green.shade800 : Colors.amber.shade900,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    isOpen ? 'Shift: ${shift.cashierName}' : 'Shift Belum Dibuka',
-                    style: TextStyle(
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.bold,
-                      color: isOpen ? Colors.green.shade900 : Colors.amber.shade900,
-                    ),
-                  ),
-                  Text(
-                    isOpen
-                        ? 'Modal: ${_currencyFormat.format(shift.startingCash)}'
-                        : 'Ketuk untuk isi modal kasir',
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: isOpen ? Colors.green.shade700 : Colors.amber.shade800,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-          if (isOpen)
-            Row(
-              children: [
-                OutlinedButton.icon(
-                  icon: const Icon(Icons.swap_vert_rounded, size: 14),
-                  label: const Text('Kas +/- [F7]', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-                  style: OutlinedButton.styleFrom(
-                    visualDensity: VisualDensity.compact,
-                    foregroundColor: Colors.green.shade800,
-                    side: BorderSide(color: Colors.green.shade300),
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                  ),
-                  onPressed: () => _showAddCashFlowDialog(context, pos),
-                ),
-                const SizedBox(width: 6),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green.shade800,
-                    foregroundColor: Colors.white,
-                    visualDensity: VisualDensity.compact,
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  ),
-                  onPressed: () => _showCloseShiftDialog(context, pos),
-                  child: const Text('Tutup Shift [F9]', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-                ),
-              ],
-            )
-          else
-            ElevatedButton.icon(
-              icon: const Icon(Icons.play_arrow_rounded, size: 16),
-              label: const Text('Buka Kasir [F9]', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.amber.shade800,
-                foregroundColor: Colors.white,
-                visualDensity: VisualDensity.compact,
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
-              onPressed: () => _showOpenShiftDialog(context, pos),
-            ),
-        ],
-      ),
-    ),
-    );
-  }
 
   void _showShiftRequiredDialog(BuildContext context, PosProvider pos, {required String actionTitle}) {
     showDialog(
@@ -7303,94 +8121,6 @@ Mohon konfirmasi jika sudah melakukan pembayaran. Terima kasih banyak atas kerja
   // ==========================================
   // FITUR 1: MASTER PELANGGAN & PEMILIH KASIR
   // ==========================================
-
-  Widget _buildCustomerSelectorBar(PosProvider pos) {
-    final customer = pos.selectedCustomer;
-    final isUmum = customer == null;
-
-    return Container(
-      color: Colors.white,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: isUmum ? const Color(0xFFF8FAFC) : Colors.blue.shade50,
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: isUmum ? const Color(0xFFE2E8F0) : Colors.blue.shade200),
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: isUmum ? const Color(0xFFE2E8F0) : Colors.blue.shade100,
-                shape: BoxShape.circle,
-              ),
-              child: Icon(
-                Icons.person,
-                size: 16,
-                color: isUmum ? const Color(0xFF64748B) : Colors.blue.shade800,
-              ),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Row(
-                    children: [
-                      const Text(
-                        'Pelanggan: ',
-                        style: TextStyle(fontSize: 10, color: Color(0xFF64748B), fontWeight: FontWeight.bold),
-                      ),
-                      Text(
-                        isUmum ? 'Umum (Default)' : customer.name,
-                        style: TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w900,
-                          color: isUmum ? const Color(0xFF0F172A) : Colors.blue.shade900,
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (!isUmum && customer.phone != null && customer.phone!.isNotEmpty)
-                    Text(
-                      'No. WA: ${customer.phone}',
-                      style: TextStyle(fontSize: 10, color: Colors.blue.shade700, fontWeight: FontWeight.w600),
-                    ),
-                  if (!isUmum && customer.hasActiveDebt)
-                    Text(
-                      'Ada Kasbon: ${_currencyFormat.format(customer.totalDebt)}',
-                      style: TextStyle(fontSize: 10, color: Colors.red.shade700, fontWeight: FontWeight.w700),
-                    ),
-                ],
-              ),
-            ),
-            if (!isUmum)
-              IconButton(
-                icon: const Icon(Icons.close, size: 16, color: Colors.grey),
-                tooltip: 'Reset ke Umum',
-                visualDensity: VisualDensity.compact,
-                onPressed: () => pos.selectCustomer(null),
-              ),
-            OutlinedButton.icon(
-              icon: const Icon(Icons.swap_horiz_rounded, size: 14),
-              label: Text(isUmum ? 'Pilih [F3]' : 'Ganti [F3]', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-              style: OutlinedButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-                foregroundColor: isUmum ? const Color(0xFF0F172A) : Colors.blue.shade800,
-                side: BorderSide(color: isUmum ? const Color(0xFFCBD5E1) : Colors.blue.shade300),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
-              onPressed: () => _showCustomerPickerModal(context, pos),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
   void _showCustomerPickerModal(BuildContext context, PosProvider pos) {
     String search = '';
