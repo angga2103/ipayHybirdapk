@@ -1222,8 +1222,8 @@ void main() {
       expect(shift.totalSales, equals(600000.0)); // Omset total penjualan tidak terpotong
     });
 
-    test('AppConfig appVersion is updated to 2.3.1 matching pubspec.yaml', () {
-      expect(AppConfig.appVersion, equals('2.3.1'));
+    test('AppConfig appVersion is updated to 2.3.2 matching pubspec.yaml', () {
+      expect(AppConfig.appVersion, equals('2.3.2'));
     });
   });
 
@@ -1514,6 +1514,79 @@ void main() {
       pos.setCartItemUnit(0, unitBatang);
       expect(pos.cart[0].activeUnitName, equals('Batang'));
       expect(pos.cartTotal, equals(6000.0));
+    });
+
+    test('PosProvider parseMultiplierQuery and multiplier search functionality', () {
+      final res1 = PosProvider.parseMultiplierQuery('5*minyak');
+      expect(res1.qty, equals(5));
+      expect(res1.cleanQuery, equals('minyak'));
+      expect(res1.hasMultiplier, isTrue);
+
+      final res2 = PosProvider.parseMultiplierQuery('10* indomie goreng ');
+      expect(res2.qty, equals(10));
+      expect(res2.cleanQuery, equals('indomie goreng'));
+      expect(res2.hasMultiplier, isTrue);
+
+      final res3 = PosProvider.parseMultiplierQuery('gor');
+      expect(res3.qty, equals(1));
+      expect(res3.cleanQuery, equals('gor'));
+      expect(res3.hasMultiplier, isFalse);
+
+      final res4 = PosProvider.parseMultiplierQuery('0*teh');
+      expect(res4.qty, equals(1));
+      expect(res4.cleanQuery, equals('teh'));
+      expect(res4.hasMultiplier, isTrue);
+
+      final pos = PosProvider();
+      final p1 = PosProduct(kode: 'MYK-01', nama: 'Minyak Goreng 1L', hargaDasar: 14000, hargaJual: 16000, stok: 50, unit: 'Pcs');
+      final p2 = PosProduct(kode: 'MYK-02', nama: 'Minyak Goreng 2L', hargaDasar: 28000, hargaJual: 32000, stok: 30, unit: 'Pcs');
+      final p3 = PosProduct(kode: 'BRS-01', nama: 'Beras Ramos 5kg', hargaDasar: 60000, hargaJual: 68000, stok: 20, unit: 'Karung');
+      pos.setMockProducts([p1, p2, p3]);
+
+      pos.search('5*gor');
+      expect(pos.hasSearchMultiplier, isTrue);
+      expect(pos.searchMultiplierQty, equals(5));
+      expect(pos.searchCleanQuery, equals('gor'));
+      expect(pos.filteredProducts.length, equals(2));
+      expect(pos.filteredProducts.map((p) => p.kode), containsAll(['MYK-01', 'MYK-02']));
+    });
+
+    test('PosProvider addToCart with dynamic qty, unit, and stock deduction validation', () {
+      final pos = PosProvider();
+      const unitBungkus = PosProductUnit(unitName: 'Bungkus', conversionFactor: 1, hargaDasar: 2500, hargaJual: 3000, isBaseUnit: true);
+      const unitDus = PosProductUnit(unitName: 'Dus', conversionFactor: 40, hargaDasar: 95000, hargaJual: 115000);
+
+      final product = PosProduct(
+        kode: 'MIE-01',
+        nama: 'Indomie Goreng',
+        hargaDasar: 2500,
+        hargaJual: 3000,
+        stok: 100, // hanya muat 2 dus (80 bungkus)
+        unit: 'Bungkus',
+        multiUnits: const [unitBungkus, unitDus],
+      );
+      pos.setMockProducts([product]);
+
+      // 1. Tambah 2 Dus (butuh 80 bungkus dari stok 100) -> Sukses
+      final ok1 = pos.addToCart(product, qty: 2, unit: unitDus);
+      expect(ok1, isTrue);
+      expect(pos.cart.length, equals(1));
+      expect(pos.cart[0].qty, equals(2));
+      expect(pos.cart[0].activeUnitName, equals('Dus'));
+      expect(pos.cart[0].totalBaseQtyDeduction, equals(80));
+
+      // 2. Tambah lagi 1 Dus (total 3 dus = 120 bungkus > stok 100) -> Gagal stok tidak cukup
+      final ok2 = pos.addToCart(product, qty: 1, unit: unitDus);
+      expect(ok2, isFalse);
+      expect(pos.errorMessage, contains('tidak mencukupi'));
+      expect(pos.cart[0].qty, equals(2)); // tetap 2
+
+      // 3. Tambah 10 Bungkus (total 80 + 10 = 90 bungkus <= 100) -> Sukses (sebagai baris satuan Bungkus terpisah)
+      final ok3 = pos.addToCart(product, qty: 10, unit: unitBungkus);
+      expect(ok3, isTrue);
+      expect(pos.cart.length, equals(2));
+      expect(pos.cart[1].qty, equals(10));
+      expect(pos.cart[1].activeUnitName, equals('Bungkus'));
     });
   });
 }

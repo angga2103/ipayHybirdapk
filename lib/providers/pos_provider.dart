@@ -107,17 +107,37 @@ class PosProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  static ({int qty, String cleanQuery, bool hasMultiplier}) parseMultiplierQuery(String raw) {
+    final match = RegExp(r'^(\d+)\*(.*)$').firstMatch(raw.trim());
+    if (match != null) {
+      final parsedQty = int.tryParse(match.group(1) ?? '1') ?? 1;
+      return (
+        qty: parsedQty > 0 ? parsedQty : 1,
+        cleanQuery: (match.group(2) ?? '').trim(),
+        hasMultiplier: true,
+      );
+    }
+    return (qty: 1, cleanQuery: raw.trim(), hasMultiplier: false);
+  }
+
+  int get searchMultiplierQty => parseMultiplierQuery(_searchQuery).qty;
+  bool get hasSearchMultiplier => parseMultiplierQuery(_searchQuery).hasMultiplier;
+  String get searchCleanQuery => parseMultiplierQuery(_searchQuery).cleanQuery;
+
   List<PosProduct> get filteredProducts {
+    final parsed = parseMultiplierQuery(_searchQuery);
+    final q = parsed.cleanQuery.toLowerCase();
+
     return _products.where((p) {
       if (p.isArchived) return false;
 
       final matchesCategory = (_selectedCategory == 'ALL') ||
           (_selectedCategory == 'Konsinyasi' ? p.isConsignment : p.kategori.toLowerCase() == _selectedCategory.toLowerCase());
 
-      final q = _searchQuery.toLowerCase().trim();
       final matchesSearch = q.isEmpty ||
           p.nama.toLowerCase().contains(q) ||
-          p.kode.toLowerCase().contains(q);
+          p.kode.toLowerCase().contains(q) ||
+          p.multiUnits.any((u) => u.barcode?.toLowerCase().contains(q) == true);
 
       return matchesCategory && matchesSearch;
     }).toList();
@@ -179,6 +199,12 @@ class PosProvider extends ChangeNotifier {
     _debts = await PosDatabaseService.instance.getAllDebts();
     _debtSummary = await PosDatabaseService.instance.getDebtSummary();
     _customers = await PosDatabaseService.instance.getCustomers();
+    notifyListeners();
+  }
+
+  @visibleForTesting
+  void setMockProducts(List<PosProduct> products) {
+    _products = List.from(products);
     notifyListeners();
   }
 
@@ -356,29 +382,42 @@ class PosProvider extends ChangeNotifier {
   }
 
   // --- Cart Operations dengan Proteksi Stok Ketat ---
-  bool addToCart(PosProduct product) {
+  bool addToCart(PosProduct product, {int qty = 1, PosProductUnit? unit}) {
+    if (qty <= 0) qty = 1;
     if (product.isStockManaged && product.stok <= 0) {
       _errorMessage = 'Stok "${product.nama}" sudah habis!';
       notifyListeners();
       return false;
     }
 
-    final PosProductUnit? defaultUnit = product.hasMultiUnit
+    final PosProductUnit? defaultUnit = unit ?? (product.hasMultiUnit
         ? product.multiUnits.firstWhere((u) => u.isBaseUnit, orElse: () => product.multiUnits.first)
-        : null;
+        : null);
 
-    final idx = _cart.indexWhere((it) => it.product.kode == product.kode);
+    final String targetUnitName = defaultUnit?.unitName ?? product.unit;
+    final int multiplier = defaultUnit?.conversionFactor ?? 1;
+
+    final idx = _cart.indexWhere((it) =>
+        it.product.kode == product.kode &&
+        it.activeUnitName.toLowerCase() == targetUnitName.toLowerCase());
+
     if (idx >= 0) {
       final item = _cart[idx];
-      final targetDeduction = (item.qty + 1) * item.unitMultiplier;
+      final targetDeduction = (item.qty + qty) * item.unitMultiplier;
       if (product.isStockManaged && targetDeduction > product.stok) {
         _errorMessage = 'Sisa stok "${product.nama}" tidak mencukupi (${product.stok} ${product.unit}).';
         notifyListeners();
         return false;
       }
-      _cart[idx].qty += 1;
+      _cart[idx].qty += qty;
     } else {
-      _cart.add(PosCartItem(product: product, qty: 1, selectedUnit: defaultUnit));
+      final targetDeduction = qty * multiplier;
+      if (product.isStockManaged && targetDeduction > product.stok) {
+        _errorMessage = 'Sisa stok "${product.nama}" tidak mencukupi (${product.stok} ${product.unit}).';
+        notifyListeners();
+        return false;
+      }
+      _cart.add(PosCartItem(product: product, qty: qty, selectedUnit: defaultUnit));
     }
     _errorMessage = null;
     notifyListeners();

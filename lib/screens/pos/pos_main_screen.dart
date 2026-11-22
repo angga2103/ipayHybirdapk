@@ -41,6 +41,11 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
   final PosKeyboardHandler _keyboardHandler = PosKeyboardHandler();
   int _selectedCartIndex = 0;
   int _highlightedProductIndex = -1;
+  int _preAddQty = 1;
+  int _preAddUnitIndex = 0;
+  bool _isCartZoneActive = false;
+  DateTime? _shiftDownTime;
+  bool _otherKeyPressedDuringShift = false;
   final TextEditingController _historyInvoiceCtrl = TextEditingController();
   final NumberFormat _currencyFormat = NumberFormat.currency(
     locale: 'id_ID',
@@ -69,6 +74,30 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
   // LOGIKA PINTASAN KEYBOARD (KEYBOARD-FIRST POS) & SCANNER HARDWARE WEDGE
   // =========================================================================
   bool _handleGlobalKeyEvent(KeyEvent event) {
+    // Standalone Shift Key Tap Detection (Toggle Keranjang vs Pencarian)
+    if (event is KeyDownEvent) {
+      if (event.logicalKey == LogicalKeyboardKey.shiftLeft || event.logicalKey == LogicalKeyboardKey.shiftRight) {
+        _shiftDownTime = DateTime.now();
+        _otherKeyPressedDuringShift = false;
+      } else if (HardwareKeyboard.instance.isShiftPressed) {
+        _otherKeyPressedDuringShift = true;
+      }
+    } else if (event is KeyUpEvent) {
+      if (event.logicalKey == LogicalKeyboardKey.shiftLeft || event.logicalKey == LogicalKeyboardKey.shiftRight) {
+        if (_shiftDownTime != null && !_otherKeyPressedDuringShift) {
+          final diff = DateTime.now().difference(_shiftDownTime!).inMilliseconds;
+          if (diff < 500) {
+            // Standalone Shift press!
+            _toggleCartSearchZone();
+            _shiftDownTime = null;
+            return true;
+          }
+        }
+        _shiftDownTime = null;
+      }
+      return false;
+    }
+
     if (event is! KeyDownEvent) return false;
 
     // 1. Cek Scanner Hardware Barcode Wedge (burst keystrokes < 60ms diakhiri Enter)
@@ -158,12 +187,15 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
       return true;
     }
     if (key == LogicalKeyboardKey.f2) {
-      _focusSearchField();
+      if (_isCartZoneActive) {
+        _toggleCartSearchZone();
+      } else {
+        _focusSearchField();
+      }
       return true;
     }
     if (key == LogicalKeyboardKey.f3) {
-      final pos = context.read<PosProvider>();
-      _showCustomerPickerModal(context, pos);
+      _toggleCartSearchZone();
       return true;
     }
     if (key == LogicalKeyboardKey.f4) {
@@ -191,6 +223,11 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
       }
       return true;
     }
+    if (key == LogicalKeyboardKey.f6) {
+      final pos = context.read<PosProvider>();
+      _showCustomerPickerModal(context, pos);
+      return true;
+    }
     if (key == LogicalKeyboardKey.f7) {
       final pos = context.read<PosProvider>();
       if (!pos.hasActiveShift) {
@@ -214,93 +251,21 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
       return true;
     }
 
-    // 4. Navigasi Keyboard saat kursor aktif di Kolom Pencarian Produk (_searchFocusNode)
-    if (_searchFocusNode.hasFocus) {
+    // =========================================================================
+    // 4. KONDISI A: MODE EDIT KERANJANG AKTIF (_isCartZoneActive == true)
+    // =========================================================================
+    if (_isCartZoneActive) {
       final pos = context.read<PosProvider>();
-      final filtered = pos.filteredProducts;
 
-      if (key == LogicalKeyboardKey.arrowDown) {
-        if (filtered.isNotEmpty) {
-          setState(() {
-            _highlightedProductIndex = (_highlightedProductIndex + 1).clamp(0, filtered.length - 1);
-          });
-          return true;
-        }
-      }
-      if (key == LogicalKeyboardKey.arrowUp) {
-        if (_highlightedProductIndex > 0) {
-          setState(() {
-            _highlightedProductIndex--;
-          });
-          return true;
-        } else if (_highlightedProductIndex == 0) {
-          setState(() {
-            _highlightedProductIndex = -1;
-          });
-          return true;
-        }
-      }
-      if (key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.numpadEnter) {
-        if (_highlightedProductIndex >= 0 && _highlightedProductIndex < filtered.length) {
-          final chosen = filtered[_highlightedProductIndex];
-          final ok = pos.addToCart(chosen);
-          if (ok) {
-            ScannerFeedbackService.playScanSuccess();
-            ScaffoldMessenger.of(context).hideCurrentSnackBar();
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                content: Text('✅ ${chosen.nama} (+1 di keranjang)'),
-                duration: const Duration(milliseconds: 700),
-                backgroundColor: AppConfig.primaryTeal,
-              ),
-            );
-          }
-          return true;
-        }
-      }
       if (key == LogicalKeyboardKey.escape) {
-        _searchFocusNode.unfocus();
-        setState(() => _highlightedProductIndex = -1);
+        _toggleCartSearchZone();
         return true;
       }
-    }
-
-    // Periksa apakah pengguna sedang aktif mengetik di TextField lain
-    final primaryFocus = FocusManager.instance.primaryFocus;
-    final isEditingText = primaryFocus != null &&
-        (primaryFocus.context?.widget is EditableText ||
-            primaryFocus.debugLabel?.contains('EditableText') == true);
-
-    if (isEditingText) {
-      if (key == LogicalKeyboardKey.escape) {
-        primaryFocus.unfocus();
-        return true;
+      if (pos.cart.isEmpty) {
+        _isCartZoneActive = false;
+        _focusSearchField();
+        return false;
       }
-      return false;
-    }
-
-    // 5. Pintasan Cepat saat TIDAK sedang fokus mengetik
-    if (key == LogicalKeyboardKey.slash) {
-      _focusSearchField();
-      return true;
-    }
-
-    final pos = context.read<PosProvider>();
-
-    // Tombol Space untuk Membuka Pembayaran Cepat
-    if (key == LogicalKeyboardKey.space) {
-      if (pos.cart.isNotEmpty) {
-        if (!pos.hasActiveShift) {
-          _showShiftRequiredDialog(context, pos, actionTitle: 'Transaksi Penjualan');
-        } else {
-          _openPaymentModal(context, pos);
-        }
-        return true;
-      }
-    }
-
-    // Pintasan Keranjang Belanja Aktif
-    if (pos.cart.isNotEmpty) {
       if (key == LogicalKeyboardKey.arrowDown) {
         setState(() {
           _selectedCartIndex = (_selectedCartIndex + 1).clamp(0, pos.cart.length - 1);
@@ -349,9 +314,165 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
         _removeSelectedCartItem(pos);
         return true;
       }
+      if (key == LogicalKeyboardKey.space) {
+        _openPaymentModal(context, pos);
+        return true;
+      }
+      return false;
+    }
+
+    // =========================================================================
+    // 5. KONDISI B: MODE PENCARIAN & KATALOG AKTIF (_isCartZoneActive == false)
+    // =========================================================================
+    if (_searchFocusNode.hasFocus) {
+      final pos = context.read<PosProvider>();
+      final filtered = pos.filteredProducts;
+
+      if (key == LogicalKeyboardKey.arrowDown) {
+        if (filtered.isNotEmpty) {
+          setState(() {
+            _highlightedProductIndex = (_highlightedProductIndex + 1).clamp(0, filtered.length - 1);
+            _preAddQty = pos.searchMultiplierQty;
+            _preAddUnitIndex = 0;
+          });
+          return true;
+        }
+      }
+      if (key == LogicalKeyboardKey.arrowUp) {
+        if (_highlightedProductIndex > 0) {
+          setState(() {
+            _highlightedProductIndex--;
+            _preAddQty = pos.searchMultiplierQty;
+            _preAddUnitIndex = 0;
+          });
+          return true;
+        } else if (_highlightedProductIndex == 0) {
+          setState(() {
+            _highlightedProductIndex = -1;
+            _preAddQty = 1;
+            _preAddUnitIndex = 0;
+          });
+          return true;
+        }
+      }
+      if (key == LogicalKeyboardKey.arrowRight) {
+        if (_highlightedProductIndex >= 0) {
+          setState(() => _preAddQty++);
+          return true;
+        }
+      }
+      if (key == LogicalKeyboardKey.arrowLeft) {
+        if (_highlightedProductIndex >= 0) {
+          setState(() => _preAddQty = (_preAddQty - 1).clamp(1, 9999));
+          return true;
+        }
+      }
+      if (key == LogicalKeyboardKey.tab) {
+        if (_highlightedProductIndex >= 0 && _highlightedProductIndex < filtered.length) {
+          final prod = filtered[_highlightedProductIndex];
+          if (prod.hasMultiUnit && prod.multiUnits.isNotEmpty) {
+            setState(() {
+              _preAddUnitIndex = (_preAddUnitIndex + 1) % prod.multiUnits.length;
+            });
+            return true;
+          }
+        }
+      }
+      if (key == LogicalKeyboardKey.enter || key == LogicalKeyboardKey.numpadEnter) {
+        _handleSearchSubmit(_searchCtrl.text, pos);
+        return true;
+      }
+      if (key == LogicalKeyboardKey.escape) {
+        if (_searchCtrl.text.isNotEmpty) {
+          _clearSearchAndKeepFocus(pos);
+        } else {
+          _searchFocusNode.unfocus();
+          setState(() => _highlightedProductIndex = -1);
+        }
+        return true;
+      }
+    }
+
+    // Periksa apakah pengguna sedang aktif mengetik di TextField lain
+    final primaryFocus = FocusManager.instance.primaryFocus;
+    final isEditingText = primaryFocus != null &&
+        (primaryFocus.context?.widget is EditableText ||
+            primaryFocus.debugLabel?.contains('EditableText') == true);
+
+    if (isEditingText) {
+      if (key == LogicalKeyboardKey.escape) {
+        primaryFocus.unfocus();
+        return true;
+      }
+      return false;
+    }
+
+    // 5. Pintasan Cepat saat TIDAK sedang fokus mengetik
+    if (key == LogicalKeyboardKey.slash) {
+      _focusSearchField();
+      return true;
+    }
+
+    final pos = context.read<PosProvider>();
+
+    // Tombol Space untuk Membuka Pembayaran Cepat
+    if (key == LogicalKeyboardKey.space) {
+      if (pos.cart.isNotEmpty) {
+        if (!pos.hasActiveShift) {
+          _showShiftRequiredDialog(context, pos, actionTitle: 'Transaksi Penjualan');
+        } else {
+          _openPaymentModal(context, pos);
+        }
+        return true;
+      }
     }
 
     return false;
+  }
+
+  void _toggleCartSearchZone() {
+    final pos = context.read<PosProvider>();
+    final isTablet = MediaQuery.of(context).size.width >= 768;
+    setState(() {
+      if (_isCartZoneActive) {
+        _isCartZoneActive = false;
+        _focusSearchField();
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('🔍 Kembali ke Mode Pencarian / Scan [Shift: Edit Keranjang]'),
+            duration: Duration(milliseconds: 700),
+            backgroundColor: Color(0xFF0F172A),
+          ),
+        );
+      } else {
+        if (pos.cart.isEmpty) {
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('⚠️ Keranjang masih kosong. Pilih atau scan produk terlebih dahulu.'),
+              duration: Duration(milliseconds: 900),
+            ),
+          );
+          return;
+        }
+        _isCartZoneActive = true;
+        _searchFocusNode.unfocus();
+        _highlightedProductIndex = -1;
+        _selectedCartIndex = _selectedCartIndex.clamp(0, pos.cart.length - 1);
+        if (!isTablet) {
+          _openCartDetailSheet(context, pos);
+        }
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('🟢 Mode Keranjang Aktif [↑↓: Baris | +/-: Qty | Del: Hapus | Shift: Kembali]'),
+            duration: const Duration(milliseconds: 900),
+            backgroundColor: Colors.teal.shade800,
+          ),
+        );
+      }
+    });
   }
 
   void _focusSearchField() {
@@ -526,43 +647,81 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
   }
 
   void _handleSearchSubmit(String query, PosProvider pos) {
-    final clean = query.trim();
-    if (clean.isEmpty) return;
-    final product = pos.findProductByBarcode(clean);
-    if (product != null) {
-      final ok = pos.addToCart(product);
+    final filtered = pos.filteredProducts;
+
+    // 1. Jika ada produk yang sedang disorot kursor panah
+    if (_highlightedProductIndex >= 0 && _highlightedProductIndex < filtered.length) {
+      final chosen = filtered[_highlightedProductIndex];
+      final PosProductUnit? unit = (chosen.hasMultiUnit && chosen.multiUnits.isNotEmpty && _preAddUnitIndex < chosen.multiUnits.length)
+          ? chosen.multiUnits[_preAddUnitIndex]
+          : null;
+      final qty = _preAddQty;
+
+      final ok = pos.addToCart(chosen, qty: qty, unit: unit);
       if (ok) {
         ScannerFeedbackService.playScanSuccess();
-        _searchCtrl.clear();
-        pos.search('');
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('✅ ${product.nama} ditambahkan ke keranjang'),
-            duration: const Duration(seconds: 1),
+            content: Text('✅ ${chosen.nama} (${qty}x ${unit?.unitName ?? chosen.unit}) masuk keranjang'),
+            duration: const Duration(milliseconds: 700),
             backgroundColor: AppConfig.primaryTeal,
           ),
         );
       } else {
         ScannerFeedbackService.playScanError();
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('⚠️ Stok "${product.nama}" tidak mencukupi!'),
+            content: Text(pos.errorMessage ?? '⚠️ Stok "${chosen.nama}" tidak mencukupi!'),
             backgroundColor: Colors.red.shade700,
           ),
         );
       }
-    } else if (pos.filteredProducts.length == 1) {
-      final onlyProduct = pos.filteredProducts.first;
-      final ok = pos.addToCart(onlyProduct);
+      _clearSearchAndKeepFocus(pos);
+      return;
+    }
+
+    // 2. Jika tidak ada yang disorot, parse query (dukung "5*indomie" atau barcode)
+    final parsed = PosProvider.parseMultiplierQuery(query);
+    final clean = parsed.cleanQuery;
+    final qty = parsed.qty;
+
+    if (clean.isEmpty && query.trim().isEmpty) return;
+
+    final product = pos.findProductByBarcode(clean);
+    if (product != null) {
+      final ok = pos.addToCart(product, qty: qty);
       if (ok) {
         ScannerFeedbackService.playScanSuccess();
-        _searchCtrl.clear();
-        pos.search('');
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('✅ ${onlyProduct.nama} ditambahkan ke keranjang'),
+            content: Text('✅ ${product.nama} (${qty}x) ditambahkan ke keranjang'),
+            duration: const Duration(seconds: 1),
+            backgroundColor: AppConfig.primaryTeal,
+          ),
+        );
+      } else {
+        ScannerFeedbackService.playScanError();
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(pos.errorMessage ?? '⚠️ Stok "${product.nama}" tidak mencukupi!'),
+            backgroundColor: Colors.red.shade700,
+          ),
+        );
+      }
+      _clearSearchAndKeepFocus(pos);
+    } else if (filtered.length == 1) {
+      final onlyProduct = filtered.first;
+      final ok = pos.addToCart(onlyProduct, qty: qty);
+      if (ok) {
+        ScannerFeedbackService.playScanSuccess();
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ ${onlyProduct.nama} (${qty}x) ditambahkan ke keranjang'),
             duration: const Duration(seconds: 1),
             backgroundColor: AppConfig.primaryTeal,
           ),
@@ -570,7 +729,29 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
       } else {
         ScannerFeedbackService.playScanError();
       }
+      _clearSearchAndKeepFocus(pos);
+    } else if (filtered.isEmpty && clean.isNotEmpty) {
+      ScannerFeedbackService.playScanError();
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('⚠️ Produk "$clean" tidak ditemukan!'),
+          duration: const Duration(milliseconds: 1200),
+          backgroundColor: Colors.red.shade700,
+        ),
+      );
     }
+  }
+
+  void _clearSearchAndKeepFocus(PosProvider pos) {
+    _searchCtrl.clear();
+    pos.search('');
+    setState(() {
+      _highlightedProductIndex = -1;
+      _preAddQty = 1;
+      _preAddUnitIndex = 0;
+    });
+    _searchFocusNode.requestFocus();
   }
 
   bool _isSameDay(DateTime? a, DateTime? b) {
@@ -895,7 +1076,7 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                     const SizedBox(width: 5),
                     Expanded(
                       child: Text(
-                        isUmum ? 'Umum [F3]' : customer.name,
+                        isUmum ? 'Umum [F6]' : customer.name,
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w800,
@@ -1031,14 +1212,39 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                     decoration: InputDecoration(
                       hintText: 'Cari nama barang / barcode... (F2 atau /)',
                       hintStyle: TextStyle(fontSize: 12, color: Colors.grey.shade500),
-                      prefixIcon: const Icon(Icons.search, size: 18, color: Color(0xFF64748B)),
+                      prefixIcon: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const SizedBox(width: 8),
+                          const Icon(Icons.search, size: 18, color: Color(0xFF64748B)),
+                          if (pos.hasSearchMultiplier) ...[
+                            const SizedBox(width: 4),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF0F766E),
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                '${pos.searchMultiplierQty}x',
+                                style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w900),
+                              ),
+                            ),
+                          ],
+                          const SizedBox(width: 6),
+                        ],
+                      ),
                       suffixIcon: _searchCtrl.text.isNotEmpty
                           ? IconButton(
                               icon: const Icon(Icons.clear, size: 16),
                               onPressed: () {
                                 _searchCtrl.clear();
                                 pos.search('');
-                                setState(() => _highlightedProductIndex = -1);
+                                setState(() {
+                                  _highlightedProductIndex = -1;
+                                  _preAddQty = 1;
+                                  _preAddUnitIndex = 0;
+                                });
                               },
                             )
                           : null,
@@ -1048,6 +1254,44 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                   ),
                 ),
               ),
+              if (pos.cart.isNotEmpty) ...[
+                const SizedBox(width: 6),
+                InkWell(
+                  onTap: () => _toggleCartSearchZone(),
+                  borderRadius: BorderRadius.circular(10),
+                  child: Container(
+                    height: 38,
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    decoration: BoxDecoration(
+                      color: _isCartZoneActive ? const Color(0xFF0F766E) : const Color(0xFFF1F5F9),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: _isCartZoneActive ? const Color(0xFF0D9488) : const Color(0xFFCBD5E1),
+                        width: _isCartZoneActive ? 1.5 : 1.0,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.shopping_cart_checkout_rounded,
+                          size: 16,
+                          color: _isCartZoneActive ? Colors.white : const Color(0xFF475569),
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          _isCartZoneActive ? 'Keranjang [Shift]' : 'Shift: Keranjang',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                            color: _isCartZoneActive ? Colors.white : const Color(0xFF334155),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(width: 6),
               // Tombol Scan Barcode Kamera Cepat
               Container(
@@ -1365,13 +1609,45 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                   ),
                   child: Text(
-                    customer != null ? 'Ganti [F3]' : 'Pilih [F3]',
+                    customer != null ? 'Ganti [F6]' : 'Pilih [F6]',
                     style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: AppConfig.primaryTeal),
                   ),
                 ),
               ],
             ),
           ),
+
+          // Banner Mode Keranjang Aktif (Jika _isCartZoneActive == true)
+          if (_isCartZoneActive)
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+              decoration: const BoxDecoration(
+                color: Color(0xFF0F766E),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.keyboard, color: Colors.white, size: 16),
+                  const SizedBox(width: 8),
+                  const Expanded(
+                    child: Text(
+                      'MODE KERANJANG — [↑↓] Baris • [+/-] Qty • [U/→] Satuan • [Del] Hapus',
+                      style: TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.bold),
+                    ),
+                  ),
+                  InkWell(
+                    onTap: () => _toggleCartSearchZone(),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.25),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Text('Shift/Esc', style: TextStyle(color: Colors.white, fontSize: 9.5, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
 
           // 3. Cart Item List / Empty state
           Expanded(
@@ -1510,8 +1786,17 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
   }
 
   Widget _buildTabletCartRow(BuildContext context, PosProvider pos, int idx, PosCartItem item) {
+    final bool isSelected = _isCartZoneActive && idx == _selectedCartIndex;
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+      decoration: BoxDecoration(
+        color: isSelected ? const Color(0xFFF0FDFA) : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+        border: isSelected
+            ? Border.all(color: AppConfig.primaryTeal, width: 1.5)
+            : null,
+      ),
       child: Row(
         children: [
           // Nama & Ubah Harga Jual Dinamis
@@ -1850,6 +2135,28 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
           ),
 
           // 3. Tombol Beli / Stepper Interaktif In-Card
+          if (isHighlighted)
+            Container(
+              margin: const EdgeInsets.fromLTRB(8, 0, 8, 4),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0F766E),
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    '$_preAddQty ${(product.hasMultiUnit && product.multiUnits.isNotEmpty && _preAddUnitIndex < product.multiUnits.length) ? product.multiUnits[_preAddUnitIndex].unitName : product.unit}',
+                    style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: Colors.white),
+                  ),
+                  const Text(
+                    '←/→ Qty • ↵ Enter',
+                    style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: Colors.white70),
+                  ),
+                ],
+              ),
+            ),
           Padding(
             padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
             child: _buildInCardStepper(pos, product, cartQty, isOutOfStock),
@@ -2173,14 +2480,14 @@ class _PosMainScreenState extends State<PosMainScreen> with SingleTickerProvider
                       if (isHighlighted) ...[
                         const SizedBox(width: 4),
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
                           decoration: BoxDecoration(
-                            color: AppConfig.primaryTeal,
+                            color: const Color(0xFF0F766E),
                             borderRadius: BorderRadius.circular(4),
                           ),
-                          child: const Text(
-                            '↵ Enter',
-                            style: TextStyle(fontSize: 8, fontWeight: FontWeight.w900, color: Colors.white),
+                          child: Text(
+                            '$_preAddQty ${(product.hasMultiUnit && product.multiUnits.isNotEmpty && _preAddUnitIndex < product.multiUnits.length) ? product.multiUnits[_preAddUnitIndex].unitName : product.unit} | ←/→ Qty | ↵ Enter',
+                            style: const TextStyle(fontSize: 8, fontWeight: FontWeight.w900, color: Colors.white),
                           ),
                         ),
                       ],
